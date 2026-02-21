@@ -1,0 +1,20 @@
+﻿# CodeMap runtime cache
+.codemap_cache/
+
+# Local generated analysis outputs (keep source code under analysis/ tracked)
+analysis/output/
+analysis/outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*

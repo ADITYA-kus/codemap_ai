@@ -1,0 +1,251 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeMap AI UI</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="title">CodeMap AI</div>
+      <div class="repo-name-wrap">
+        <div id="repo-name" class="repo-name">No repo selected</div>
+        <span id="repo-private-badge" class="repo-badge private hidden">PRIVATE MODE</span>
+      </div>
+    </div>
+    <div class="workspace-controls">
+      <select id="repo-select" class="repo-select"></select>
+      <button id="add-repo-btn" class="repo-btn" type="button">+ Add repo...</button>
+      <button id="ai-settings-btn" class="repo-btn" type="button">Settings</button>
+      <span id="repo-list-mode-pill" class="repo-badge">Session Mode</span>
+      <span id="ai-mode-badge" class="repo-badge">AI: OFF</span>
+    </div>
+    <div id="meta" class="meta">Loading...</div>
+  </header>
+  <section id="add-repo-inline" class="add-repo-inline hidden">
+    <div class="add-repo-header">
+      <div class="section-title">Add Repository</div>
+      <button id="repo-inline-close" class="repo-btn" type="button">Close</button>
+    </div>
+    <div class="modal-tabs">
+      <button id="repo-tab-local" class="tab-btn active" type="button">Local Path</button>
+      <button id="repo-tab-github" class="tab-btn" type="button">GitHub</button>
+    </div>
+    <div id="repo-form-local" class="modal-form">
+      <label>Repo path
+        <input id="local-repo-path" type="text" placeholder="D:\repo\project or ./repo" />
+      </label>
+      <label>Display name (optional)
+        <input id="local-display-name" type="text" placeholder="defaults to folder name" />
+      </label>
+    </div>
+    <div id="repo-form-github" class="modal-form hidden">
+      <label>GitHub URL
+        <input id="gh-repo-url" type="text" placeholder="https://github.com/org/repo" />
+      </label>
+      <label>Ref
+        <input id="gh-ref" type="text" value="main" />
+      </label>
+      <label>Mode
+        <select id="gh-mode">
+          <option value="zip" selected>zip</option>
+          <option value="git">git</option>
+        </select>
+      </label>
+      <label>Token (optional for private repos)
+        <input id="gh-token" type="password" placeholder="Used for this run only" />
+      </label>
+      <label class="path">
+        <input id="gh-private-mode" type="checkbox" />
+        Private Repo Mode
+      </label>
+      <div id="private-mode-indicator" class="private-mode hidden" title="Token used only in memory; not stored; you can clear cached analysis anytime.">
+        🔒 Private Repo Mode: Tokens are used only in memory; nothing is uploaded; you can delete cached data anytime.
+      </div>
+    </div>
+    <div id="repo-modal-error" class="status"></div>
+    <div class="modal-actions">
+      <button id="repo-add-btn" class="repo-btn" type="button">Add repo</button>
+      <button id="repo-cancel-btn" class="repo-btn" type="button">Cancel</button>
+    </div>
+  </section>
+  <div id="ai-settings-modal" class="confirm-modal hidden">
+    <div class="confirm-card settings-card">
+      <div class="section-title">AI Settings</div>
+      <div class="path">General</div>
+      <label class="path">
+        <input id="ai-settings-remember-repos" type="checkbox" />
+        Remember repositories across sessions
+      </label>
+      <div class="repo-row-actions">
+        <button id="ai-settings-clear-repos" class="repo-btn danger" type="button">Clear repository list</button>
+      </div>
+      <div class="divider"></div>
+      <div class="path">Provider</div>
+      <label>Provider
+        <select id="ai-settings-provider">
+          <option value="none" selected>None</option>
+          <option value="gemini">Gemini</option>
+          <option value="groq">Groq</option>
+          <option value="xai">xAI</option>
+        </select>
+      </label>
+      <label>API key
+        <input id="ai-settings-key" type="password" placeholder="Used locally" />
+      </label>
+      <label>Model (optional)
+        <input id="ai-settings-model" type="text" placeholder="Leave empty for default" />
+      </label>
+      <label class="path"><input id="ai-settings-save-local" type="checkbox" checked /> Save locally on this machine</label>
+      <div id="ai-settings-status" class="status"></div>
+      <div class="repo-row-actions">
+        <button id="ai-settings-test" class="repo-btn" type="button">Test Key</button>
+        <button id="ai-settings-save" class="repo-btn" type="button">Save</button>
+        <button id="ai-settings-clear" class="repo-btn danger" type="button">Clear key</button>
+        <button id="ai-settings-cancel" class="repo-btn" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="layout shell">
+    <section class="panel">
+      <h2>Repository Tree</h2>
+      <div id="tree-status" class="status"></div>
+      <div id="repo-list" class="card">
+        <div class="section-title">Repositories</div>
+        <div id="repo-list-content" class="content muted">No repositories added yet. Add a local path or GitHub repo to begin.</div>
+      </div>
+      <div id="tree" class="tree"></div>
+      <div class="divider"></div>
+      <div id="data-privacy" class="card">
+        <div class="section-title">Data &amp; Privacy</div>
+        <div id="privacy-summary" class="path">Loading data retention...</div>
+        <div id="privacy-repo-list-mode" class="path">Repository list: Session-only</div>
+        <div id="privacy-private-banner" class="privacy-warning hidden">Private repo mode: caches auto-expire in 7 days unless you change retention.</div>
+        <div id="privacy-expiring" class="content muted"></div>
+      <div class="privacy-controls">
+        <label>Retention
+          <select id="repo-retention-select">
+            <option value="1">1 day</option>
+            <option value="7">7 days</option>
+            <option value="14" selected>14 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="0">Never</option>
+          </select>
+        </label>
+      </div>
+      <div class="path">Shorter retention = more privacy.</div>
+      <div class="privacy-actions">
+        <button id="repo-retention-save-btn" class="repo-btn" type="button">Set retention</button>
+        <button id="cleanup-dry-btn" class="repo-btn" type="button">Run Cleanup (Dry Run)</button>
+          <button id="cleanup-now-btn" class="repo-btn" type="button">Run Cleanup Now</button>
+          <button id="delete-repo-cache-btn" class="repo-btn danger" type="button">Delete cached data (repo)</button>
+          <button id="delete-all-caches-btn" class="repo-btn danger" type="button">Delete ALL caches</button>
+        </div>
+        <div id="privacy-confirm" class="content muted hidden"></div>
+        <label class="path">
+          <input id="auto-clean-on-remove" type="checkbox" />
+          Delete cached data when I remove this repo
+        </label>
+        <div id="auto-clean-note" class="path hidden">Removing from UI will also delete local cache.</div>
+        <div class="path">Your analysis data is stored locally under .codemap_cache. You can delete it anytime.</div>
+        <div class="path">API keys are never saved to disk. BYOK keys live only in memory for a single request.</div>
+        <div class="path">Retention cleanup runs locally; nothing is uploaded.</div>
+        <div id="privacy-result" class="content muted"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>File Intelligence</h2>
+      <div class="search-wrap">
+        <input id="symbol-search-input" type="text" autocomplete="off"
+          placeholder="Search symbols (e.g., Student.display, intro, parse...)" />
+        <div id="symbol-search-results" class="search-results hidden"></div>
+      </div>
+      <div class="recent-wrap">
+        <div id="recent-symbols-wrap">
+          <div class="section-title">Recent Symbols</div>
+          <div id="recent-symbols" class="content muted"></div>
+        </div>
+        <div id="recent-files-wrap">
+          <div class="section-title">Recent Files</div>
+          <div id="recent-files" class="content muted"></div>
+        </div>
+      </div>
+      <div id="file-view" class="content muted">Select a file from the tree.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Symbol Intelligence</h2>
+      <div class="view-toggle">
+        <button id="tab-details" class="tab-btn active" type="button">Details</button>
+        <button id="tab-impact" class="tab-btn" type="button">Impact</button>
+        <button id="tab-graph" class="tab-btn" type="button">Graph</button>
+        <button id="tab-architecture" class="tab-btn" type="button">Architecture</button>
+      </div>
+      <div id="graph-controls" class="graph-controls hidden">
+        <label>Mode
+          <select id="graph-mode">
+            <option value="symbol" selected>Symbol</option>
+            <option value="file">File</option>
+          </select>
+        </label>
+        <label>Depth
+          <select id="graph-depth">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <label><input id="graph-hide-builtins" type="checkbox" checked /> Hide builtins</label>
+        <label><input id="graph-hide-external" type="checkbox" checked /> Hide external</label>
+        <input id="graph-search" type="text" placeholder="Search graph nodes..." />
+      </div>
+      <div id="impact-controls" class="graph-controls hidden">
+        <label>Depth
+          <select id="impact-depth">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <label>Max nodes
+          <select id="impact-max-nodes">
+            <option value="200" selected>200</option>
+            <option value="100">100</option>
+            <option value="50">50</option>
+            <option value="10">10</option>
+            <option value="1">1 (test truncation)</option>
+          </select>
+        </label>
+      </div>
+      <div id="symbol-view" class="content muted">Select a symbol to view summary and usages.</div>
+      <div id="impact-view" class="content muted hidden">Select a symbol to view impact.</div>
+      <div id="graph-view" class="content muted hidden">Select a symbol to view graph.</div>
+      <div id="architecture-view" class="content muted hidden">Select a repository to view architecture insights.</div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="confirm-modal" class="confirm-modal hidden">
+    <div class="confirm-card">
+      <div id="confirm-title" class="section-title">Confirm action</div>
+      <div id="confirm-message" class="path"></div>
+      <div class="repo-row-actions">
+        <button id="confirm-yes" class="repo-btn danger" type="button">Yes</button>
+        <button id="confirm-no" class="repo-btn" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.CODEMAP_DEFAULT_REPO = "{{ default_repo }}";
+  </script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
+
