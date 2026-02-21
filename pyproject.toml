@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codemap-ai"
+version = "0.1.0"
+description = "CodeMap AI local dashboard and CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.23",
+  "jinja2>=3.1",
+]
+
+[project.scripts]
+codemap = "codemap_cli:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["cli", "codemap_cli", "security_utils"]
+
+[tool.setuptools.packages.find]
+include = ["analysis*", "ui*"]
+
+[tool.setuptools.package-data]
+ui = ["templates/*.html", "static/*"]

@@ -1464,6 +1464,26 @@ def api_analyze(args) -> int:
     return 0
 
 
+def cmd_ui(args) -> int:
+    host = str(getattr(args, "host", "127.0.0.1") or "127.0.0.1").strip() or "127.0.0.1"
+    port = int(getattr(args, "port", 8000) or 8000)
+    reload_flag = bool(getattr(args, "reload", False))
+
+    try:
+        import uvicorn
+    except Exception as e:
+        sys.stderr.write(f"Failed to import uvicorn: {e}\n")
+        return 1
+
+    sys.stdout.write(f"Starting CodeMap UI at http://{host}:{port} (local-only)\n")
+    sys.stdout.flush()
+    try:
+        uvicorn.run("ui.app:app", host=host, port=port, reload=reload_flag)
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -1489,6 +1509,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--repo", default=None, help="Repository directory to read repo-scoped cached explain.json")
     p_list.add_argument("--limit", type=int, default=50, help="Max results to show")
     p_list.set_defaults(func=cmd_list)
+
+    p_ui = sub.add_parser("ui", help="Run local CodeMap UI server")
+    p_ui.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    p_ui.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
+    p_ui.add_argument("--reload", action="store_true", help="Enable autoreload for development")
+    p_ui.set_defaults(func=cmd_ui)
 
 
 
