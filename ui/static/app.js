@@ -87,6 +87,7 @@
   const fileCache = new Map();
   const symbolCache = new Map();
   const symbolAiSummaryCache = new Map();
+  let symbolExplainAbortController = null;
   let repoDir = "";
   let repoName = "";
   let activeSymbolFqn = "";
@@ -290,27 +291,11 @@
       regenerate: !!(payload && payload.regenerate),
       symbol: payload && payload.symbol ? String(payload.symbol) : "",
     };
-    const makeRequest = async (apiKey) => {
-      const headers = { "Content-Type": "application/json" };
-      const oneTimeKey = String(apiKey || "").trim();
-      if (oneTimeKey) headers["X-CodeMap-LLM-Key"] = oneTimeKey;
-      return fetchJson(`/api/ai/${action}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
-    };
-    try {
-      return await makeRequest("");
-    } catch (e) {
-      const code = String((e && e.error) || "");
-      if (code !== "MISSING_API_KEY") throw e;
-      const oneTimeKey = window.prompt("Add your API key for this request:");
-      if (!oneTimeKey || !String(oneTimeKey).trim()) {
-        throw { ok: false, error: "MISSING_API_KEY", message: "Add your API key to use BYOK." };
-      }
-      return makeRequest(String(oneTimeKey).trim());
-    }
+    return fetchJson(`/api/ai/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
   }
 
   function setAiSettingsStatus(message, isError) {
@@ -345,10 +330,13 @@
     const provider = String(aiSettingsProviderEl && aiSettingsProviderEl.value ? aiSettingsProviderEl.value : "none").trim().toLowerCase();
     const model = String(aiSettingsModelEl && aiSettingsModelEl.value ? aiSettingsModelEl.value : "").trim();
     const saveLocal = !!(aiSettingsSaveLocalEl && aiSettingsSaveLocalEl.checked);
+    const apiKey = String(aiSettingsKeyEl && aiSettingsKeyEl.value ? aiSettingsKeyEl.value : "").trim();
     try {
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["X-CodeMap-LLM-Key"] = apiKey;
       const data = await fetchJson("/api/settings/ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           provider,
           model,
@@ -386,14 +374,12 @@
         headers: { "Content-Type": "application/json", "X-CodeMap-LLM-Key": apiKey },
         body: JSON.stringify({ provider, model }),
       });
-      setAiSettingsStatus(data.message || "Test passed.", false);
+      setAiSettingsStatus((data.message || "Credentials look valid.") + " Click Save to apply.", false);
       showToast("AI key test passed", "success");
     } catch (e) {
       const msg = redactSecrets((e && (e.message || e.error)) || "AI key test failed.");
       setAiSettingsStatus(msg, true);
       showToast(msg, "error");
-    } finally {
-      if (aiSettingsKeyEl) aiSettingsKeyEl.value = "";
     }
   }
 
@@ -2687,44 +2673,55 @@
     const opts = options || {};
     const regenerate = !!opts.regenerate;
     const force = !!opts.force;
-    if (regenerate && !aiEnabled) {
-      showToast(aiStatusMessage || "AI summary is disabled. Open Settings -> AI to enable (optional).", "error");
+    const cancelOnly = !!opts.cancelOnly;
+    if (cancelOnly) {
+      if (symbolExplainAbortController) {
+        symbolExplainAbortController.abort();
+        symbolExplainAbortController = null;
+      }
       return;
     }
+    if (symbolExplainAbortController) {
+      symbolExplainAbortController.abort();
+      symbolExplainAbortController = null;
+    }
+    symbolExplainAbortController = new AbortController();
     try {
-      const data = await callAiEndpoint("llm_explain", {
-        symbol: key,
-        force,
-        regenerate,
+      const data = await fetchJson("/api/symbol/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repo_hash: activeRepoHash || "",
+          repo: repoDir || "",
+          symbol: key,
+          force: regenerate ? force : false,
+        }),
+        signal: symbolExplainAbortController.signal,
       });
-      aiProvider = String(data.provider || aiProvider || "");
-      if (!data.exists) {
-        symbolAiSummaryCache.delete(key);
-        if (activeSymbolFqn === key) {
-          symbolCache.delete(key);
-          await loadSymbol(key);
-        }
-        showToast(data.message || "No cached summary for current analysis. Click Regenerate.", "error");
-        return;
-      }
       symbolAiSummaryCache.set(key, {
-        text: String(data.explain_text || "").trim(),
+        text: String(data.explanation_markdown || "").trim(),
         provider: String(data.provider || ""),
         cached: !!data.cached,
-        updatedAt: String(data.updated_at || new Date().toISOString()),
+        updatedAt: String(data.created_at || new Date().toISOString()),
       });
       if (activeSymbolFqn === key) {
         symbolCache.delete(key);
         await loadSymbol(key);
       }
-      showToast(regenerate ? (data.cached ? "Using cached summary" : "Summary generated") : "Loaded cached summary", "success");
+      showToast(regenerate ? (data.cached ? "Using cached explanation" : "Explanation refreshed") : (data.cached ? "Loaded cached explanation" : "Explanation generated"), "success");
     } catch (e) {
+      if (e && e.name === "AbortError") {
+        showToast("Explanation request cancelled.", "success");
+        return;
+      }
       const errCode = String((e && e.error) || "");
-      if (errCode === "AI_DISABLED") {
-        showToast(aiStatusMessage || "AI summary is disabled. Open Settings -> AI to enable (optional).", "error");
+      if (errCode === "LLM_NOT_CONFIGURED") {
+        showToast("To enable AI explanations, set CODEMAP_LLM and provider API key in server env, then restart UI server.", "error");
         return;
       }
       showToast(redactSecrets((e && (e.message || e.error)) || "AI summary refresh failed"), "error");
+    } finally {
+      symbolExplainAbortController = null;
     }
   }
 
@@ -2738,33 +2735,46 @@
       const symbolPromise = (async () => {
         let symbolData = symbolCache.get(fqn);
         if (!symbolData) {
-          symbolData = await fetchJson(`/api/symbol?fqn=${encodeURIComponent(fqn)}`);
+          symbolData = await fetchJson(`/api/symbol/info?symbol=${encodeURIComponent(fqn)}&repo=${encodeURIComponent(repoDir || "")}`);
           symbolCache.set(fqn, symbolData);
         }
         return symbolData;
       })();
 
       const [symbolData] = await Promise.all([symbolPromise, delay(150)]);
-
-      const result = symbolData.result || {};
-      const loc = result.location || {};
-      const relFile = relPath(loc.file || "");
+      const result = symbolData.symbol || {};
+      const symbolQualified = String(result.qualified || fqn);
+      const relFile = relPath(result.file_path || "");
       if (relFile && relFile !== activeFilePath) {
         await loadFile(relFile);
       }
 
-      const aiSummary = symbolAiSummaryCache.get(result.fqn || fqn);
-      const summary = stripMarkdown((aiSummary && aiSummary.text) || result.one_liner || "");
+      const aiSummary = symbolAiSummaryCache.get(symbolQualified);
+      const summary = stripMarkdown((aiSummary && aiSummary.text) || "");
       const aiSummaryStatus = aiSummary
         ? `provider: ${aiSummary.provider || "none"} | cached: ${String(!!aiSummary.cached)} | updated: ${aiSummary.updatedAt || "unknown"}`
-        : "No cached AI summary for current analysis.";
-      const notes = (result.details || []).filter((d) => String(d).startsWith("Returns:")).slice(0, 3).map(stripMarkdown);
-      const symbolParts = parseSymbolParts(result.fqn || fqn);
-      const locationText = `${relFile}:${loc.start_line || ""}`;
-      const connections = result.connections || {};
-      const calledBy = connections.called_by || [];
-      const calls = connections.calls || [];
-      const usedIn = (connections.used_in || []).slice().sort((a, b) => (a.file || "").localeCompare(b.file || ""));
+        : "No cached explanation yet. Click Explain (AI).";
+
+      const symbolParts = parseSymbolParts(symbolQualified);
+      const locationText = `${relFile || "unknown"}:${result.line_start || ""}-${result.line_end || ""}`;
+      const calledBy = (Array.isArray(result.callers) ? result.callers : [])
+        .filter((c) => c && c.qualified)
+        .slice()
+        .sort((a, b) => (a.file || "").localeCompare(b.file || ""));
+      const calls = (Array.isArray(result.callees) ? result.callees : [])
+        .filter((c) => c && c.qualified)
+        .map((c) => ({
+          name: shortLabel(c.qualified),
+          fqn: c.qualified,
+          count: 1,
+          clickable: !String(c.qualified).startsWith("builtins."),
+          file: c.file || "",
+          line: c.line || "",
+        }));
+      const usedIn = calledBy;
+      const signature = String(result.signature || "").trim();
+      const docstring = String(result.docstring || "").trim();
+      const kind = String(result.kind || "unknown");
 
       const crumbs = [
         { label: repoName || "repo", action: "repo", value: "" },
@@ -2773,7 +2783,7 @@
       if (symbolParts.className) {
         crumbs.push({ label: symbolParts.className, action: "class", value: symbolParts.className });
       }
-      crumbs.push({ label: symbolParts.symbol, action: "symbol", value: result.fqn || fqn });
+      crumbs.push({ label: symbolParts.symbol, action: "symbol", value: symbolQualified });
 
       symbolViewEl.innerHTML = `
         <div class="card symbol-card fade-panel">
@@ -2786,22 +2796,27 @@
             <button class="chip" data-target="used-in-section">Used in: ${usedIn.length}</button>
           </div>
           <div class="symbol-title-main">${esc(symbolParts.display)}</div>
-          <div class="path">FQN: ${esc(result.fqn || fqn)}</div>
+          <div class="path">Qualified: ${esc(symbolQualified)}</div>
+          <div class="path">Kind: ${esc(kind)}</div>
           <div class="path">${esc(locationText)}</div>
+          ${signature ? `<div class="path">Signature: <code>${esc(signature)}</code></div>` : ""}
+          ${docstring ? `<div class="path">Docstring: ${esc(docstring)}</div>` : "<div class='path muted'>Docstring: none</div>"}
           <div class="divider"></div>
-          <div class="section-title">Summary</div>
+          <div class="section-title">Explanation</div>
           <div class="repo-row-actions">
-            <button id="symbol-ai-view-btn" class="repo-btn small" type="button">View cached AI summary</button>
-            <button id="symbol-ai-regen-btn" class="repo-btn small" type="button" ${aiEnabled ? "" : "disabled"}>Regenerate AI summary</button>
+            <button id="symbol-ai-view-btn" class="repo-btn small" type="button">Explain (AI)</button>
+            <button id="symbol-ai-regen-btn" class="repo-btn small" type="button" ${aiEnabled ? "" : "disabled"}>Refresh explanation</button>
+            <button id="symbol-ai-cancel-btn" class="repo-btn small" type="button">Cancel</button>
             <label class="path"><input id="symbol-ai-force" type="checkbox" /> Force regenerate</label>
           </div>
           <div class="path">AI Mode: ${esc(aiEnabled ? `BYOK (${aiProvider || "auto"})` : "OFF")} | ${esc(aiSummaryStatus)}</div>
-          <div>${esc(summary)}</div>
+          ${!aiEnabled ? "<div class='path muted'>To enable AI explanations, set CODEMAP_LLM and provider API key in server environment, then restart UI server.</div>" : ""}
+          ${summary ? `<div>${esc(summary)}</div>` : "<div class='muted'>No explanation loaded.</div>"}
           <div id="called-by-section" class="divider"></div>
           <div class="section-title">Called by</div>
           ${renderConnectionBlock(calledBy, (c) => `
             <div>
-              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.fqn)}">${esc(c.fqn)}</span>
+              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.qualified)}">${esc(c.qualified)}</span>
               <span class="path">${esc(c.file)}:${esc(c.line)}</span>
             </div>
           `, "No callers found")}
@@ -2813,7 +2828,7 @@
                 ? `<span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.fqn)}">${esc(c.name)}</span>`
                 : `<span class="connection-muted">${esc(c.name)}</span>`
               }
-              <span class="path">(${esc(c.count)}x)</span>
+              <span class="path">${esc(c.file)}:${esc(c.line)}</span>
             </div>
           `, "No calls found")}
           <div class="divider"></div>
@@ -2821,36 +2836,33 @@
           ${renderConnectionBlock(calls.slice(0, 10), (c) => `
             <div>
               <span class="${c.clickable ? "connection-link" : "connection-muted"}" ${c.clickable ? `data-fqn="${esc(c.fqn)}"` : ""}>${esc(c.name)}</span>
-              <span class="path">(${esc(c.count)}x)</span>
             </div>
           `, "No callees found")}
           <div id="used-in-section" class="divider"></div>
           <div class="section-title">Used in</div>
           ${renderConnectionBlock(usedIn, (u) => `
             <div>
-              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(u.fqn)}">${esc(u.fqn)}</span>
+              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(u.qualified)}">${esc(u.qualified)}</span>
               <span class="path">${esc(u.file)}:${esc(u.line)}</span>
             </div>
           `, "No usages found")}
-          <div class="divider"></div>
-          <div class="section-title">Notes</div>
-          ${notes.length ? notes.map((n) => `<div>${esc(n)}</div>`).join("") : "<div class='muted'>None</div>"}
         </div>
       `;
 
       bindConnectionLinks(symbolViewEl);
-      bindBreadcrumbs(symbolViewEl, result.fqn || fqn);
+      bindBreadcrumbs(symbolViewEl, symbolQualified);
       bindConnectionChips(symbolViewEl);
+
       const viewBtn = symbolViewEl.querySelector("#symbol-ai-view-btn");
       if (viewBtn) {
         viewBtn.addEventListener("click", async () => {
           viewBtn.disabled = true;
           viewBtn.textContent = "Loading...";
           try {
-            await refreshSymbolAiSummary(result.fqn || fqn, { regenerate: false, force: false });
+            await refreshSymbolAiSummary(symbolQualified, { regenerate: false, force: false });
           } finally {
             viewBtn.disabled = false;
-            viewBtn.textContent = "View cached AI summary";
+            viewBtn.textContent = "Explain (AI)";
           }
         });
       }
@@ -2860,22 +2872,29 @@
           const forceEl = symbolViewEl.querySelector("#symbol-ai-force");
           const force = !!(forceEl && forceEl.checked);
           regenBtn.disabled = true;
-          regenBtn.textContent = "Regenerating...";
+          regenBtn.textContent = "Refreshing...";
           try {
-            await refreshSymbolAiSummary(result.fqn || fqn, { regenerate: true, force });
+            await refreshSymbolAiSummary(symbolQualified, { regenerate: true, force });
           } finally {
             regenBtn.disabled = false;
-            regenBtn.textContent = "Regenerate AI summary";
+            regenBtn.textContent = "Refresh explanation";
           }
         });
       }
+      const cancelBtn = symbolViewEl.querySelector("#symbol-ai-cancel-btn");
+      if (cancelBtn) {
+        cancelBtn.addEventListener("click", async () => {
+          await refreshSymbolAiSummary(symbolQualified, { cancelOnly: true });
+        });
+      }
+
       highlightActiveSymbol();
-      await updateUiState({ opened_symbol: (result.fqn || fqn), last_symbol: (result.fqn || fqn) });
+      await updateUiState({ opened_symbol: symbolQualified, last_symbol: symbolQualified });
       if (activeTab === "graph" && graphParams().mode === "symbol") {
-        await loadGraph(result.fqn || fqn);
+        await loadGraph(symbolQualified);
       }
       if (activeTab === "impact") {
-        await loadImpact(result.fqn || fqn);
+        await loadImpact(symbolQualified);
       }
     } catch (e) {
       const errCode = String((e && e.error) || "");

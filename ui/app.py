@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -45,6 +46,7 @@ MISSING_CACHE_MESSAGE = "Not analyzed yet. Run: python cli.py api analyze --path
 
 _AI_SETTINGS_MEMORY: Dict[str, Any] = {
     "provider": "none",
+    "api_key": "",
     "model": "",
     "configured": False,
     "saved_at": "",
@@ -99,7 +101,7 @@ def _effective_ai_settings() -> Dict[str, Any]:
     provider = str(mem.get("provider", "") or "").strip().lower()
     model = str(mem.get("model", "") or "")
     if provider in {"gemini", "groq", "xai"}:
-        api_key = str(_provider_key_from_env(provider) or "")
+        api_key = str(mem.get("api_key", "") or "").strip() or str(_provider_key_from_env(provider) or "")
         return {"provider": provider, "api_key": api_key, "model": model, "configured": bool(api_key)}
 
     file_cfg = _load_ai_settings_file()
@@ -625,6 +627,11 @@ def _get_llm_key_from_request(
     body_key = str(data.get("api_key", "") or "").strip()
     if body_key:
         return body_key
+    cfg = _effective_ai_settings()
+    cfg_provider = str(cfg.get("provider", "") or "").strip().lower()
+    cfg_key = str(cfg.get("api_key", "") or "").strip()
+    if provider and cfg_provider == provider and cfg_key:
+        return cfg_key
     return _provider_key_from_env(provider)
 
 
@@ -667,6 +674,10 @@ def _repo_summary_cache_path(cache_dir: str) -> str:
     return os.path.join(_ai_cache_root(cache_dir), "repo_summary.json")
 
 
+def _legacy_repo_summary_cache_path(cache_dir: str) -> str:
+    return os.path.join(cache_dir, "repo_summary.json")
+
+
 def _safe_symbol_cache_key(fqn: str) -> str:
     base = re.sub(r"[^A-Za-z0-9._-]+", "_", str(fqn or "")).strip("._-")
     if not base:
@@ -679,10 +690,63 @@ def _symbol_summary_cache_path(cache_dir: str, fqn: str) -> str:
     return os.path.join(_ai_cache_root(cache_dir), "symbols", _safe_symbol_cache_key(fqn))
 
 
+def _symbol_explain_v1_cache_path(cache_dir: str, analysis_fingerprint: str, fqn: str) -> str:
+    safe_fp = re.sub(r"[^A-Za-z0-9._-]+", "_", str(analysis_fingerprint or "")).strip("._-") or "current"
+    return os.path.join(cache_dir, "ai_cache", "symbol_explain", safe_fp, _safe_symbol_cache_key(fqn))
+
+
 def _load_repo_summary_cached(cache_dir: str) -> Dict[str, Any]:
     path = _repo_summary_cache_path(cache_dir)
     data = _load_json(path, {})
-    return data if isinstance(data, dict) else {}
+    if isinstance(data, dict) and data:
+        return data
+    legacy = _load_json(_legacy_repo_summary_cache_path(cache_dir), {})
+    return legacy if isinstance(legacy, dict) else {}
+
+
+def _normalize_repo_summary_cache_payload(
+    payload: Dict[str, Any],
+    repo_hash: str,
+    analysis_version: str,
+    fingerprint: str,
+) -> Dict[str, Any]:
+    raw = payload if isinstance(payload, dict) else {}
+    if not raw:
+        return {}
+
+    # New cache format already.
+    if str(raw.get("content_markdown", "") or "").strip():
+        out = dict(raw)
+        if not str(out.get("repo_hash", "") or "").strip():
+            out["repo_hash"] = repo_hash
+        if not str(out.get("analysis_version", "") or "").strip():
+            out["analysis_version"] = analysis_version
+        if not str(out.get("fingerprint", "") or "").strip():
+            out["fingerprint"] = fingerprint
+        if not str(out.get("generated_at", "") or "").strip():
+            out["generated_at"] = _now_utc()
+        if not str(out.get("cached_at", "") or "").strip():
+            out["cached_at"] = str(out.get("generated_at", "") or _now_utc())
+        return out
+
+    # Legacy CLI format: {"ok":true, "provider":"...", "summary":{"one_liner","bullets","notes"}}
+    summary_obj = raw.get("summary", {}) if isinstance(raw.get("summary"), dict) else {}
+    content_markdown = _summary_markdown_from_structured(summary_obj)
+    if not content_markdown:
+        content_markdown = str(raw.get("content_markdown", "") or "").strip()
+    if not content_markdown:
+        return {}
+
+    return {
+        "repo_hash": repo_hash,
+        "analysis_version": analysis_version,
+        "fingerprint": fingerprint,
+        "provider": str(raw.get("provider", "") or "none"),
+        "model": str(raw.get("model", "") or ""),
+        "cached_at": _now_utc(),
+        "generated_at": str(raw.get("generated_at", "") or _now_utc()),
+        "content_markdown": content_markdown,
+    }
 
 
 def _load_symbol_summary_cached(cache_dir: str, fqn: str) -> Dict[str, Any]:
@@ -696,6 +760,268 @@ def _record_ai_fingerprint_source(repo_hash: str, fingerprint: str) -> None:
         upsert_metadata(repo_hash, ai_fingerprint_source=str(fingerprint or ""))
     except Exception:
         pass
+
+
+def _symbol_kind_from_fqn(fqn: str) -> str:
+    parts = str(fqn or "").split(".")
+    if not parts:
+        return "unknown"
+    name = parts[-1]
+    if name == "<module>":
+        return "module"
+    if len(parts) >= 2 and parts[-2][:1].isupper():
+        return "method"
+    return "function"
+
+
+def _format_signature_from_node(node: ast.AST) -> str:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+        try:
+            args_rendered = ast.unparse(node.args)
+        except Exception:
+            args_rendered = ""
+        return f"{prefix} {node.name}({args_rendered}):"
+    if isinstance(node, ast.ClassDef):
+        bases: List[str] = []
+        for base in node.bases:
+            try:
+                bases.append(ast.unparse(base))
+            except Exception:
+                continue
+        if bases:
+            return f"class {node.name}({', '.join(bases)}):"
+        return f"class {node.name}:"
+    return ""
+
+
+def _extract_symbol_signature_docstring(
+    file_path: str,
+    fqn: str,
+    kind: str,
+    line_start: int,
+    line_end: int,
+) -> Tuple[str, str]:
+    if not file_path or not os.path.exists(file_path):
+        return "", ""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        tree = ast.parse(source)
+    except Exception:
+        return "", ""
+
+    signature = ""
+    docstring = ""
+    if kind == "module":
+        return "<module>", ast.get_docstring(tree) or ""
+
+    parts = str(fqn or "").split(".")
+    symbol_name = parts[-1] if parts else ""
+    class_name = parts[-2] if len(parts) >= 2 and parts[-2][:1].isupper() else ""
+    target: Optional[ast.AST] = None
+
+    if kind == "method" and class_name:
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == symbol_name:
+                        if int(getattr(item, "lineno", -1)) == int(line_start):
+                            target = item
+                            break
+                if target:
+                    break
+
+    if target is None and kind == "class":
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == symbol_name:
+                if int(getattr(node, "lineno", -1)) == int(line_start):
+                    target = node
+                    break
+
+    if target is None and kind in {"function", "method"}:
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == symbol_name:
+                if int(getattr(node, "lineno", -1)) == int(line_start):
+                    target = node
+                    break
+
+    if target is None:
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            ns = int(getattr(node, "lineno", -1) or -1)
+            ne = int(getattr(node, "end_lineno", ns) or ns)
+            if ns <= int(line_start) <= ne or ns <= int(line_end) <= ne:
+                target = node
+                break
+
+    if target is not None:
+        signature = _format_signature_from_node(target)
+        try:
+            docstring = ast.get_docstring(target) or ""
+        except Exception:
+            docstring = ""
+
+    return signature, docstring
+
+
+def _symbol_location_map(explain: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for fqn, obj in (explain.items() if isinstance(explain, dict) else []):
+        if not isinstance(obj, dict):
+            continue
+        loc = obj.get("location", {}) if isinstance(obj.get("location"), dict) else {}
+        out[str(fqn)] = {
+            "file": str(loc.get("file", "") or ""),
+            "start_line": int(loc.get("start_line", 1) or 1),
+            "end_line": int(loc.get("end_line", loc.get("start_line", 1)) or loc.get("start_line", 1) or 1),
+        }
+    return out
+
+
+def _build_symbol_info_payload(ctx: Dict[str, str], symbol_fqn: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    explain = _load_json(ctx["explain_path"], {})
+    if not isinstance(explain, dict):
+        return None, "Explain cache unavailable."
+    symbol_entry = explain.get(symbol_fqn)
+    if not isinstance(symbol_entry, dict):
+        return None, "Symbol not found in analysis cache."
+
+    resolved_calls = _load_json(ctx["resolved_calls_path"], [])
+    if not isinstance(resolved_calls, list):
+        resolved_calls = []
+
+    loc = symbol_entry.get("location", {}) if isinstance(symbol_entry.get("location"), dict) else {}
+    file_path = str(loc.get("file", "") or "")
+    line_start = int(loc.get("start_line", 1) or 1)
+    line_end = int(loc.get("end_line", line_start) or line_start)
+    kind = _symbol_kind_from_fqn(symbol_fqn)
+    signature, docstring = _extract_symbol_signature_docstring(file_path, symbol_fqn, kind, line_start, line_end)
+
+    location_by_fqn = _symbol_location_map(explain)
+    callers_seen: set = set()
+    callers: List[Dict[str, Any]] = []
+    callees_seen: set = set()
+    callees: List[Dict[str, Any]] = []
+
+    for call in resolved_calls:
+        if not isinstance(call, dict):
+            continue
+        caller_fqn = str(call.get("caller_fqn", "") or "")
+        callee_fqn = str(call.get("callee_fqn", "") or "")
+        call_file = _rel_file(ctx, str(call.get("file", "") or ""))
+        call_line = int(call.get("line", -1) or -1)
+
+        if callee_fqn == symbol_fqn and caller_fqn:
+            key = (caller_fqn, call_file, call_line)
+            if key not in callers_seen:
+                callers_seen.add(key)
+                callers.append({"qualified": caller_fqn, "file": call_file, "line": call_line})
+
+        if caller_fqn == symbol_fqn:
+            qualified = callee_fqn or str(call.get("callee", "") or "")
+            if not qualified:
+                continue
+            callee_loc = location_by_fqn.get(qualified, {})
+            callee_file = _rel_file(ctx, str(callee_loc.get("file", "") or call.get("file", "") or ""))
+            callee_line = int(callee_loc.get("start_line", call_line) or call_line)
+            key = (qualified, callee_file, callee_line)
+            if key not in callees_seen:
+                callees_seen.add(key)
+                callees.append({"qualified": qualified, "file": callee_file, "line": callee_line})
+
+    callers.sort(key=lambda x: (x.get("file", ""), int(x.get("line", -1)), x.get("qualified", "")))
+    callees.sort(key=lambda x: (x.get("file", ""), int(x.get("line", -1)), x.get("qualified", "")))
+
+    details = symbol_entry.get("details", []) if isinstance(symbol_entry.get("details"), list) else []
+    if not signature:
+        for detail in details:
+            text = str(detail or "")
+            if text.startswith("Signature:"):
+                signature = text.replace("Signature:", "", 1).strip()
+                break
+
+    repo_entry = _get_active_repo_entry() or {}
+    repo_identity = {
+        "repo_hash": str(ctx.get("repo_hash", "") or ""),
+        "repo_dir": str(ctx.get("repo_dir", "") or ""),
+        "source": str(repo_entry.get("source", "filesystem") or "filesystem"),
+        "repo_url": str(repo_entry.get("repo_url", "") or ""),
+        "ref": str(repo_entry.get("ref", "") or ""),
+        "mode": str(repo_entry.get("mode", "") or ""),
+    }
+
+    payload = {
+        "ok": True,
+        "repo": repo_identity,
+        "symbol": {
+            "qualified": symbol_fqn,
+            "kind": kind,
+            "file_path": file_path,
+            "line_start": line_start,
+            "line_end": line_end,
+            "signature": signature,
+            "docstring": docstring,
+            "callers_count": len(callers),
+            "callees_count": len(callees),
+            "callers": callers[:30],
+            "callees": callees[:30],
+        },
+    }
+    return payload, None
+
+
+def _load_symbol_excerpt(file_path: str, line_start: int, line_end: int, max_lines: int = 120) -> str:
+    if not file_path or not os.path.exists(file_path):
+        return ""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return ""
+    total = len(lines)
+    start = max(1, int(line_start) - 20)
+    end = min(total, int(line_end) + 20)
+    if end < start:
+        end = start
+    chunk = lines[start - 1:end]
+    if len(chunk) > max_lines:
+        chunk = chunk[:max_lines]
+    return "".join(chunk)
+
+
+def _build_symbol_explain_prompt(symbol_info: Dict[str, Any], excerpt: str) -> str:
+    symbol = symbol_info.get("symbol", {}) if isinstance(symbol_info.get("symbol"), dict) else {}
+    callers = symbol.get("callers", []) if isinstance(symbol.get("callers"), list) else []
+    callees = symbol.get("callees", []) if isinstance(symbol.get("callees"), list) else []
+    callers_preview = callers[:10]
+    callees_preview = callees[:10]
+    context = {
+        "qualified": symbol.get("qualified", ""),
+        "kind": symbol.get("kind", "unknown"),
+        "signature": symbol.get("signature", ""),
+        "docstring": symbol.get("docstring", ""),
+        "file_path": symbol.get("file_path", ""),
+        "line_start": symbol.get("line_start", 0),
+        "line_end": symbol.get("line_end", 0),
+        "callers_count": symbol.get("callers_count", 0),
+        "callees_count": symbol.get("callees_count", 0),
+        "callers": callers_preview,
+        "callees": callees_preview,
+    }
+    return (
+        "You are explaining a source-code symbol for a local developer tool.\n"
+        "Write concise markdown with these sections:\n"
+        "1) What it does\n"
+        "2) Inputs/outputs/side effects\n"
+        "3) How it is used (from callers)\n"
+        "4) Pitfalls or gotchas\n"
+        "5) Suggested refactor (if coupling/risk appears high)\n"
+        "Keep the response practical and under 220 words.\n\n"
+        f"Structured context JSON:\n{json.dumps(context, ensure_ascii=True)}\n\n"
+        f"Code excerpt (max 120 lines):\n```python\n{excerpt}\n```"
+    )
 
 
 def _summary_markdown_from_structured(summary: Dict[str, Any]) -> str:
@@ -1888,12 +2214,21 @@ async def api_settings_ai_post(request: Request):
 
     model = str(payload.get("model", "") or "").strip()
     save_local = bool(payload.get("save_local", True))
+    incoming_key = _get_llm_key_from_request(request=request, payload=payload, provider=provider)
+    prior_provider = str(_AI_SETTINGS_MEMORY.get("provider", "") or "").strip().lower()
+    prior_key = str(_AI_SETTINGS_MEMORY.get("api_key", "") or "").strip()
     if provider == "none":
         model = ""
+        incoming_key = ""
+    elif not incoming_key and prior_provider == provider and prior_key:
+        incoming_key = prior_key
 
     _AI_SETTINGS_MEMORY["provider"] = provider
+    _AI_SETTINGS_MEMORY["api_key"] = incoming_key
     _AI_SETTINGS_MEMORY["model"] = model
-    _AI_SETTINGS_MEMORY["configured"] = bool(provider in {"gemini", "groq", "xai"} and _provider_key_from_env(provider))
+    _AI_SETTINGS_MEMORY["configured"] = bool(
+        provider in {"gemini", "groq", "xai"} and (incoming_key or _provider_key_from_env(provider))
+    )
     _AI_SETTINGS_MEMORY["saved_at"] = _now_utc()
 
     if save_local:
@@ -1965,7 +2300,18 @@ def api_repo_summary(repo: Optional[str] = Query(default=None)):
     _record_ai_fingerprint_source(ctx["repo_hash"], current_fp)
     current_analysis_version = _analysis_version_from_cache(ctx["cache_dir"])
 
-    if not os.path.exists(summary_path):
+    cached_raw = _load_repo_summary_cached(ctx["cache_dir"])
+    cached = _normalize_repo_summary_cache_payload(
+        payload=cached_raw,
+        repo_hash=ctx["repo_hash"],
+        analysis_version=current_analysis_version,
+        fingerprint=current_fp,
+    )
+    if cached and str(cached.get("content_markdown", "") or "").strip():
+        # Auto-migrate legacy summary files into canonical ai cache path.
+        if not os.path.exists(summary_path):
+            _save_json(summary_path, cached)
+    else:
         return {
             "ok": True,
             "exists": False,
@@ -1976,7 +2322,6 @@ def api_repo_summary(repo: Optional[str] = Query(default=None)):
             "message": "No cached summary for current analysis. Click Regenerate.",
         }
 
-    cached = _load_repo_summary_cached(ctx["cache_dir"])
     cached_fp = str(cached.get("fingerprint", "") or "")
     cached_version = str(cached.get("analysis_version", "") or "")
     is_fresh = bool(cached_fp and cached_fp == current_fp and cached_version == current_analysis_version)
@@ -2544,6 +2889,172 @@ def api_symbol(fqn: str = Query(...), repo: Optional[str] = Query(default=None))
     result = dict(obj)
     result["connections"] = _build_symbol_connections(ctx, fqn, explain, resolved_calls)
     return {"ok": True, "result": result}
+
+
+@app.get("/api/symbol/info")
+def api_symbol_info(
+    symbol: str = Query(..., min_length=1),
+    repo: Optional[str] = Query(default=None),
+):
+    ctx = _repo_ctx(repo) if repo else _active_repo_ctx()
+    if not ctx:
+        return _no_active_repo_response()
+    if not _has_analysis_cache(ctx):
+        return _missing_cache_response()
+
+    payload, err = _build_symbol_info_payload(ctx, str(symbol).strip())
+    if err or not payload:
+        return JSONResponse(
+            status_code=404,
+            content=redact_payload(
+                {
+                    "ok": False,
+                    "error": "SYMBOL_NOT_FOUND",
+                    "message": err or "Symbol not found in analysis cache.",
+                    "symbol": str(symbol).strip(),
+                }
+            ),
+        )
+    return redact_payload(payload)
+
+
+@app.post("/api/symbol/explain")
+async def api_symbol_explain(request: Request):
+    body = await request.json()
+    payload = body if isinstance(body, dict) else {}
+    symbol = str(payload.get("symbol", "") or "").strip()
+    if not symbol:
+        return JSONResponse(
+            status_code=400,
+            content=redact_payload({"ok": False, "error_code": "INVALID_SYMBOL", "message": "symbol is required"}),
+        )
+
+    repo_dir, err = _resolve_repo_dir_from_payload(payload)
+    if err or not repo_dir:
+        return JSONResponse(
+            status_code=400,
+            content=redact_payload({"ok": False, "error_code": "INVALID_REPO", "message": err or "Provide a valid repo"}),
+        )
+
+    ctx = _repo_ctx_from_dir(repo_dir)
+    if not _has_analysis_cache(ctx):
+        return _missing_cache_response()
+
+    symbol_info, info_err = _build_symbol_info_payload(ctx, symbol)
+    if info_err or not symbol_info:
+        return JSONResponse(
+            status_code=404,
+            content=redact_payload(
+                {
+                    "ok": False,
+                    "error_code": "SYMBOL_NOT_FOUND",
+                    "message": info_err or "Symbol not found in analysis cache.",
+                    "symbol": symbol,
+                }
+            ),
+        )
+
+    analysis_version = _analysis_version_from_cache(ctx["cache_dir"])
+    artifact_fingerprint = compute_analysis_fingerprint(ctx["repo_dir"])
+    analysis_fingerprint = hashlib.sha256(
+        f"{analysis_version}|{artifact_fingerprint}".encode("utf-8")
+    ).hexdigest()[:24]
+    cache_path = _symbol_explain_v1_cache_path(ctx["cache_dir"], analysis_fingerprint, symbol)
+    force = bool(payload.get("force", False))
+
+    if not force and os.path.exists(cache_path):
+        cached = _load_json(cache_path, {})
+        if isinstance(cached, dict) and str(cached.get("explanation_markdown", "") or "").strip():
+            try:
+                touch_last_accessed(ctx["repo_hash"])
+            except Exception:
+                pass
+            out = dict(cached)
+            out["cached"] = True
+            return JSONResponse(content=redact_payload(out))
+
+    status = _ai_provider_status()
+    provider = str(status.get("provider", "") or "").strip().lower()
+    if provider not in {"gemini", "groq", "xai"}:
+        provider = str(os.getenv("CODEMAP_LLM", "gemini") or "gemini").strip().lower() or "gemini"
+    if provider not in {"gemini", "groq", "xai"}:
+        provider = "gemini"
+    api_key = _get_llm_key_from_request(request=request, payload=payload, provider=provider)
+    if not api_key:
+        return JSONResponse(
+            status_code=400,
+            content=redact_payload(
+                {
+                    "ok": False,
+                    "error_code": "LLM_NOT_CONFIGURED",
+                    "message": "To enable AI explanations, set CODEMAP_LLM and the provider API key in the server environment, then restart UI server.",
+                }
+            ),
+        )
+
+    symbol_payload = symbol_info.get("symbol", {}) if isinstance(symbol_info.get("symbol"), dict) else {}
+    excerpt = _load_symbol_excerpt(
+        file_path=str(symbol_payload.get("file_path", "") or ""),
+        line_start=int(symbol_payload.get("line_start", 1) or 1),
+        line_end=int(symbol_payload.get("line_end", symbol_payload.get("line_start", 1)) or symbol_payload.get("line_start", 1) or 1),
+        max_lines=120,
+    )
+    prompt = _build_symbol_explain_prompt(symbol_info, excerpt)
+
+    try:
+        from analysis.explain import ai_client
+
+        model = str(
+            os.getenv(f"CODEMAP_{provider.upper()}_MODEL", "") or ""
+        ).strip()
+        with _temporary_env(_ai_env_for_provider(provider=provider, api_key=api_key, model=model)):
+            llm_result = ai_client.complete_text(prompt)
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content=redact_payload(
+                {
+                    "ok": False,
+                    "error_code": "LLM_CALL_FAILED",
+                    "message": redact_secrets(str(e), extra_secrets=[api_key]),
+                }
+            ),
+        )
+
+    if not isinstance(llm_result, dict) or not llm_result.get("ok"):
+        return JSONResponse(
+            status_code=400,
+            content=redact_payload(
+                {
+                    "ok": False,
+                    "error_code": "LLM_CALL_FAILED",
+                    "message": redact_secrets(str((llm_result or {}).get("error", "AI explanation failed")), extra_secrets=[api_key]),
+                }
+            ),
+        )
+
+    explanation_markdown = str(llm_result.get("text", "") or "").strip()
+    if not explanation_markdown:
+        explanation_markdown = "No explanation generated."
+
+    save_payload = {
+        "ok": True,
+        "symbol": symbol,
+        "analysis_fingerprint": analysis_fingerprint,
+        "provider": str(llm_result.get("provider", "") or provider),
+        "created_at": _now_utc(),
+        "explanation_markdown": explanation_markdown,
+    }
+    _save_json(cache_path, save_payload)
+    api_key = ""
+
+    try:
+        touch_last_accessed(ctx["repo_hash"])
+    except Exception:
+        pass
+    out = dict(save_payload)
+    out["cached"] = False
+    return JSONResponse(content=redact_payload(out))
 
 
 @app.get("/api/usages")
