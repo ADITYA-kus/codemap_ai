@@ -70,6 +70,34 @@ class TestUiAiSettingsAndSummaryCache(unittest.TestCase):
         self.assertEqual(data_stale.get("reason"), "STALE_OR_MISSING")
         self.assertTrue(data_stale.get("outdated"))
 
+    def test_repo_summary_legacy_cli_cache_is_migrated_and_visible(self):
+        legacy_path = os.path.join(self.cache_dir, "repo_summary.json")
+        legacy_payload = {
+            "ok": True,
+            "repo": "tmp",
+            "repo_hash": "legacy",
+            "cached": False,
+            "provider": "gemini",
+            "summary": {
+                "one_liner": "Legacy summary line.",
+                "bullets": ["A", "B"],
+                "notes": [],
+            },
+            "error": None,
+        }
+        with open(legacy_path, "w", encoding="utf-8") as f:
+            json.dump(legacy_payload, f)
+
+        res = self.client.get("/api/repo_summary", params={"repo": self.repo_dir})
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertTrue(body.get("ok"))
+        self.assertTrue(body.get("exists"))
+        self.assertTrue(body.get("cached"))
+        repo_summary = body.get("repo_summary", {})
+        self.assertIn("Legacy summary line.", str(repo_summary.get("content_markdown", "")))
+        self.assertTrue(os.path.exists(_repo_summary_cache_path(self.cache_dir)))
+
     def test_generate_uses_cache_on_second_call(self):
         self.client.post(
             "/api/settings/ai",

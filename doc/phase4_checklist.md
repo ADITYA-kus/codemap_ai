@@ -108,3 +108,25 @@ H) Repo List Session Mode (Privacy-first)
  "Remember repositories across sessions" is enabled in Settings.
  Repo list persistence source is `.codemap_cache/_registry.json` (no auto-import from cache folders).
  "Clear repository list" removes list entries only and does not delete analysis caches.
+
+I) Explain Symbol v1 (Local + Cache-first)
+
+ 1) Run analysis:
+ `python cli.py api analyze --path testing_repo`
+
+ 2) Start UI server:
+ `uvicorn ui.app:app --reload --port 8000`
+
+ 3) Open UI, select a symbol, then click:
+ - `Explain (AI)` to generate/load explanation
+ - `Refresh explanation` with force option to regenerate
+
+ 4) BYOK setup (server environment):
+ - `CODEMAP_LLM=gemini|groq|xai`
+ - provider key env (`GEMINI_API_KEY` / `GROQ_API_KEY` / `XAI_API_KEY`)
+ If not configured, UI shows a friendly instruction and all non-AI features continue working.
+
+ 5) Cache behavior:
+ Explanations are stored under:
+ `.codemap_cache/<repo_hash>/ai_cache/symbol_explain/<analysis_fingerprint>/<symbol>.json`
+ Re-clicking Explain reuses cache. Regeneration only happens on force.
