@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import sys
+import webbrowser
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -15,6 +16,22 @@ def print_json(obj) -> None:
 
 MISSING_ANALYSIS_MESSAGE = "Run: python cli.py api analyze --path <repo>"
 ANALYSIS_VERSION = "2.2"
+
+
+def _print_public_help() -> int:
+    sys.stdout.write(
+        "usage: codemap [-h] {analyze,dashboard,open,cache} ...\n\n"
+        "CodeMap CLI: query cached architecture intelligence\n\n"
+        "positional arguments:\n"
+        "  {analyze,dashboard,open,cache}\n"
+        "    analyze       Analyze filesystem or GitHub repository\n"
+        "    dashboard     Run local CodeMap dashboard server\n"
+        "    open          Open dashboard URL in browser\n"
+        "    cache         Cache management\n\n"
+        "options:\n"
+        "  -h, --help      show this help message and exit\n"
+    )
+    return 0
 
 
 
@@ -962,28 +979,7 @@ def api_status(args) -> int:
     return 0
 
 
-def api_llm_explain(args) -> int:
-    from analysis.explain.ai_client import llm_explain_symbol
-
-    paths = resolve_repo_paths(args.repo)
-    if not os.path.exists(paths["explain_path"]):
-        print_json({
-            "ok": False,
-            "error": "MISSING_ANALYSIS",
-            "message": MISSING_ANALYSIS_MESSAGE,
-        })
-        return 1
-
-    force = bool(getattr(args, "force", False) or getattr(args, "no_cache", False))
-
-    result = llm_explain_symbol(fqn=args.fqn, repo_dir=paths["repo_dir"], no_cache=force)
-    print_json(result)
-    _touch_repo_access_by_dir(paths["repo_dir"])
-    return 0 if result.get("ok") else 1
-
-
 def api_repo_summary(args) -> int:
-    from analysis.explain import ai_client
     from analysis.explain.repo_summary_generator import generate_repo_summary
     from analysis.utils.cache_manager import compute_repo_hash
 
@@ -999,35 +995,19 @@ def api_repo_summary(args) -> int:
             "repo": os.path.basename(os.path.abspath(repo_dir).rstrip("\\/")),
             "repo_hash": compute_repo_hash(repo_dir),
             "cached": False,
-            "provider": None,
             "summary": {},
             "error": "Missing architecture cache. Run: python cli.py api analyze --path <repo>",
         })
         return 1
 
-    force = bool(getattr(args, "force", False))
-
-    result = generate_repo_summary(repo_cache_dir=cache_dir, llm_client=ai_client)
-    if not result.get("ok"):
-        print_json({
-            "ok": False,
-            "repo": os.path.basename(os.path.abspath(repo_dir).rstrip("\\/")),
-            "repo_hash": compute_repo_hash(repo_dir),
-            "cached": bool(result.get("cached", False)),
-            "provider": result.get("provider"),
-            "summary": {},
-            "error": result.get("error"),
-        })
-        return 1
-
+    result = generate_repo_summary(repo_cache_dir=cache_dir)
     final = {
-        "ok": True,
+        "ok": bool(result.get("ok")),
         "repo": os.path.basename(os.path.abspath(repo_dir).rstrip("\\/")),
         "repo_hash": compute_repo_hash(repo_dir),
         "cached": bool(result.get("cached", False)),
-        "provider": result.get("provider"),
         "summary": result.get("summary", {}),
-        "error": None,
+        "error": result.get("error"),
     }
 
     repo_summary_path = os.path.join(cache_dir, "repo_summary.json")
@@ -1036,7 +1016,7 @@ def api_repo_summary(args) -> int:
 
     print_json(final)
     _touch_repo_access_by_dir(repo_dir)
-    return 0
+    return 0 if final["ok"] else 1
 
 
 def api_risk_radar(args) -> int:
@@ -1484,33 +1464,118 @@ def cmd_ui(args) -> int:
     return 0
 
 
+def cmd_dashboard(args) -> int:
+    return cmd_ui(args)
+
+
+def cmd_open(args) -> int:
+    host = str(getattr(args, "host", "127.0.0.1") or "127.0.0.1").strip() or "127.0.0.1"
+    port = int(getattr(args, "port", 8000) or 8000)
+    url = f"http://{host}:{port}"
+    try:
+        ok = webbrowser.open(url)
+    except Exception as e:
+        sys.stderr.write(f"Failed to open browser: {e}\n")
+        return 1
+    if not ok:
+        sys.stderr.write(f"Failed to open browser automatically. Open {url} manually.\n")
+        return 1
+    sys.stdout.write(f"Opened {url}\n")
+    return 0
+
+
+def cmd_analyze(args) -> int:
+    return api_analyze(args)
+
+
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="codemap-ai",
-        description="CodeMap AI CLI (Phase-5): query explain.json"
+        prog="codemap",
+        description="CodeMap CLI: query cached architecture intelligence"
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_explain = sub.add_parser("explain", help="Explain a symbol by fully-qualified name")
+    p_analyze = sub.add_parser("analyze", help="Analyze filesystem or GitHub repository")
+    p_analyze.add_argument("--path", default=None, help="Repository directory to analyze")
+    p_analyze.add_argument("--github", default=None, help="Public GitHub repository URL (https://github.com/<org>/<repo>)")
+    p_analyze.add_argument("--ref", default=None, help="Optional Git branch or tag when using --github")
+    p_analyze.add_argument("--mode", default="git", choices=["git", "zip"], help="GitHub fetch mode")
+    p_analyze.add_argument("--token", default=None, help="GitHub personal access token (optional)")
+    p_analyze.add_argument("--token-stdin", action="store_true", help="Read GitHub token from stdin")
+    p_analyze.add_argument("--refresh", action="store_true", help="GitHub only: delete workspace clone and fetch again")
+    p_analyze.add_argument("--rebuild", action="store_true", help="Force full analysis rebuild even if cache is valid")
+    p_analyze.add_argument("--clear-cache", action="store_true", help="Delete analysis cache directory before analyze")
+    p_analyze.add_argument("--retention", default="ttl", choices=["ttl", "session_only", "pinned"], help="Retention policy mode")
+    p_analyze.add_argument("--ttl-days", type=int, default=None, help="TTL in days when retention mode is ttl (0 = never)")
+    p_analyze.set_defaults(func=cmd_analyze)
+
+    p_dashboard = sub.add_parser("dashboard", help="Run local CodeMap dashboard server")
+    p_dashboard.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    p_dashboard.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
+    p_dashboard.add_argument("--reload", action="store_true", help="Enable autoreload for development")
+    p_dashboard.set_defaults(func=cmd_dashboard)
+
+    p_open = sub.add_parser("open", help="Open dashboard URL in browser")
+    p_open.add_argument("--host", default="127.0.0.1", help="Host to open (default: 127.0.0.1)")
+    p_open.add_argument("--port", type=int, default=8000, help="Port to open (default: 8000)")
+    p_open.set_defaults(func=cmd_open)
+
+    p_cache = sub.add_parser("cache", help="Cache management")
+    cache_pub_sub = p_cache.add_subparsers(dest="cache_command", required=True)
+    p_cache_list = cache_pub_sub.add_parser("list", help="List cache directories")
+    p_cache_list.set_defaults(func=api_cache_list)
+    p_cache_info = cache_pub_sub.add_parser("info", help="Inspect one cache target")
+    p_cache_info.add_argument("--path", default=None, help="Local repository path")
+    p_cache_info.add_argument("--github", default=None, help="GitHub repository URL")
+    p_cache_info.add_argument("--ref", default=None, help="GitHub ref")
+    p_cache_info.add_argument("--mode", default="git", choices=["git", "zip"], help="GitHub mode")
+    p_cache_info.set_defaults(func=api_cache_info)
+    p_cache_clear = cache_pub_sub.add_parser("clear", help="Clear one cache target safely")
+    p_cache_clear.add_argument("--all", action="store_true", help="Clear every known cache")
+    p_cache_clear.add_argument("--repo_hash", "--repo-hash", default=None, help="Direct repo hash target")
+    p_cache_clear.add_argument("--path", default=None, help="Local repository path")
+    p_cache_clear.add_argument("--github", default=None, help="GitHub repository URL")
+    p_cache_clear.add_argument("--ref", default=None, help="GitHub ref")
+    p_cache_clear.add_argument("--mode", default="git", choices=["git", "zip"], help="GitHub mode")
+    p_cache_clear.add_argument("--dry-run", action="store_true", help="Show what would be deleted")
+    p_cache_clear.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    p_cache_clear.add_argument("--include-workspace", action="store_true", help="Also remove workspace even if shared")
+    p_cache_clear.set_defaults(func=api_cache_clear)
+    p_cache_retention = cache_pub_sub.add_parser("retention", help="Set per-repo retention in days")
+    p_cache_retention.add_argument("--repo_hash", "--repo-hash", default=None, help="Direct repo hash target")
+    p_cache_retention.add_argument("--path", default=None, help="Local repository path")
+    p_cache_retention.add_argument("--github", default=None, help="GitHub repository URL")
+    p_cache_retention.add_argument("--ref", default=None, help="GitHub ref")
+    p_cache_retention.add_argument("--mode", default="git", choices=["git", "zip"], help="GitHub mode")
+    p_cache_retention.add_argument("--days", type=int, required=True, help="Retention days (0 means never auto-delete)")
+    p_cache_retention.add_argument("--yes", action="store_true", help="Confirm retention update")
+    p_cache_retention.set_defaults(func=api_cache_retention)
+    p_cache_sweep = cache_pub_sub.add_parser("sweep", help="Sweep expired caches by per-repo retention metadata")
+    p_cache_sweep.add_argument("--dry-run", action="store_true", help="Show what would be deleted")
+    p_cache_sweep.add_argument("--yes", action="store_true", help="Confirm deletion")
+    p_cache_sweep.set_defaults(func=api_cache_sweep)
+
+    p_explain = sub.add_parser("explain", help=argparse.SUPPRESS)
     p_explain.add_argument("fqn", help="Fully-qualified symbol name (e.g. testing_repo.test.Student.display)")
     p_explain.add_argument("--repo", default=None, help="Repository directory to read repo-scoped cached explain.json")
     p_explain.set_defaults(func=cmd_explain)
 
-    p_search = sub.add_parser("search", help="Search symbols by substring")
+    p_search = sub.add_parser("search", help=argparse.SUPPRESS)
     p_search.add_argument("query", help="Search keyword (case-insensitive)")
     p_search.add_argument("--repo", default=None, help="Repository directory to read repo-scoped cached explain.json")
     p_search.add_argument("--limit", type=int, default=30, help="Max results to show")
     p_search.set_defaults(func=cmd_search)
 
-    p_list = sub.add_parser("list", help="List all symbols (optionally filter by module prefix)")
+    p_list = sub.add_parser("list", help=argparse.SUPPRESS)
     p_list.add_argument("--module", default=None, help="Module prefix filter (e.g. testing_repo.test)")
     p_list.add_argument("--repo", default=None, help="Repository directory to read repo-scoped cached explain.json")
     p_list.add_argument("--limit", type=int, default=50, help="Max results to show")
     p_list.set_defaults(func=cmd_list)
 
-    p_ui = sub.add_parser("ui", help="Run local CodeMap UI server")
+    p_ui = sub.add_parser("ui", help=argparse.SUPPRESS)
     p_ui.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     p_ui.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
     p_ui.add_argument("--reload", action="store_true", help="Enable autoreload for development")
@@ -1521,7 +1586,7 @@ def build_parser() -> argparse.ArgumentParser:
     # -------------------------
     # API (JSON stdout) commands
     # -------------------------
-    p_api = sub.add_parser("api", help="Machine-readable JSON API over explain.json")
+    p_api = sub.add_parser("api", help=argparse.SUPPRESS)
     api_sub = p_api.add_subparsers(dest="api_command", required=True)
 
     p_api_help = api_sub.add_parser("help", help="Show API command help (JSON)")
@@ -1548,20 +1613,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_api_status.add_argument("--repo", default=None, help="Repository directory to read repo-scoped cached explain.json")
     p_api_status.set_defaults(func=api_status)
 
-    p_api_llm_explain = api_sub.add_parser("llm_explain", help="LLM-enhanced architecture explanation for one symbol")
-    p_api_llm_explain.add_argument("fqn", help="Fully-qualified symbol name")
-    p_api_llm_explain.add_argument("--repo", required=True, help="Repository directory to analyze")
-    p_api_llm_explain.add_argument("--no-cache", action="store_true", help="Bypass read-cache for this request")
-    p_api_llm_explain.add_argument("--mode", choices=["byok"], default="byok", help="AI mode selection")
-    p_api_llm_explain.add_argument("--byok", action="store_true", help="Force BYOK mode")
-    p_api_llm_explain.add_argument("--force", action="store_true", help="Force regenerate (bypass cache)")
-    p_api_llm_explain.set_defaults(func=api_llm_explain)
-
-    p_api_repo_summary = api_sub.add_parser("repo_summary", help="LLM repo-level architectural summary")
+    p_api_repo_summary = api_sub.add_parser("repo_summary", help="Deterministic repo-level architecture summary")
     p_api_repo_summary.add_argument("--repo", required=True, help="Repository directory to summarize")
-    p_api_repo_summary.add_argument("--mode", choices=["byok"], default="byok", help="AI mode selection")
-    p_api_repo_summary.add_argument("--byok", action="store_true", help="Force BYOK mode")
-    p_api_repo_summary.add_argument("--force", action="store_true", help="Force regenerate (bypass cache)")
     p_api_repo_summary.set_defaults(func=api_repo_summary)
 
     p_api_risk_radar = api_sub.add_parser("risk_radar", help="Repo-level risk radar from cached architecture artifacts")
@@ -1663,6 +1716,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 def main() -> int:
+    argv = sys.argv[1:]
+    if not argv or (len(argv) == 1 and argv[0] in {"-h", "--help"}):
+        return _print_public_help()
     parser = build_parser()
     args = parser.parse_args()
     return args.func(args)

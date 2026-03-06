@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
@@ -385,7 +385,7 @@ def _list_repo_hash_dirs(base_dir: Optional[str] = None) -> List[str]:
     root = cache_root(base_dir)
     out: List[str] = []
     for name in sorted(os.listdir(root)):
-        if name in {"workspaces", "hosted_ai", "_local"}:
+        if name in {"workspaces", "_local"}:
             continue
         path = os.path.join(root, name)
         if not os.path.isdir(path):
@@ -656,3 +656,4 @@ def apply_retention(base_dir: Optional[str] = None, now: Optional[datetime] = No
 
 def cleanup(dry_run: bool = False, base_dir: Optional[str] = None) -> Dict[str, Any]:
     return sweep_expired(dry_run=dry_run, base_dir=base_dir)
+

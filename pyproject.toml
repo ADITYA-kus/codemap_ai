@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codemap-ai"
 version = "0.1.0"
-description = "CodeMap AI local dashboard and CLI"
+description = "CodeMap local dashboard and CLI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

@@ -1,6 +1,5 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-import hashlib
 import json
 import os
 from typing import Any, Dict, List, Tuple
@@ -32,6 +31,7 @@ def build_repo_summary_context(repo_cache_dir: str) -> dict:
     dep = _load_json(os.path.join(repo_cache_dir, "dependency_cycles.json"), {})
     analysis = _load_json(os.path.join(repo_cache_dir, "analysis_metrics.json"), {})
     tree = _load_json(os.path.join(repo_cache_dir, "project_tree.json"), {})
+    risk = _load_json(os.path.join(repo_cache_dir, "risk_radar.json"), {})
 
     repo = arch.get("repo", {}) if isinstance(arch.get("repo"), dict) else {}
     symbols = arch.get("symbols", {}) if isinstance(arch.get("symbols"), dict) else {}
@@ -55,7 +55,8 @@ def build_repo_summary_context(repo_cache_dir: str) -> dict:
             )
         return out
 
-    context = {
+    top_hotspots = risk.get("top_hotspots", []) if isinstance(risk.get("top_hotspots"), list) else []
+    return {
         "repo_prefix": str(arch.get("repo_prefix", "") or ""),
         "counts": {
             "symbols": int(len(symbols)),
@@ -69,96 +70,69 @@ def build_repo_summary_context(repo_cache_dir: str) -> dict:
         "dead_symbols": [str(x) for x in (repo.get("dead_symbols") or [])][:10],
         "cycles": dep.get("cycles", [])[:5] if isinstance(dep.get("cycles"), list) else [],
         "top_tree_entries": tree.get("children", [])[:10] if isinstance(tree, dict) else [],
+        "top_hotspots": top_hotspots[:5],
     }
 
-    # Keep payload small.
-    compact = json.dumps(context, ensure_ascii=True)
-    if len(compact.encode("utf-8")) > 4096:
-        context["top_tree_entries"] = []
-        context["dead_symbols"] = context["dead_symbols"][:5]
-    return context
+
+def _normalize_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    bullets = [str(x).strip() for x in (summary.get("bullets") or []) if str(x).strip()][:7]
+    one = str(summary.get("one_liner", "") or "").strip() or (bullets[0] if bullets else "Repository summary unavailable.")
+    notes = [str(x).strip() for x in (summary.get("notes") or []) if str(x).strip()][:5]
+    return {"one_liner": one[:180], "bullets": bullets, "notes": notes}
 
 
-def _cache_key(context: Dict[str, Any], prompt_version: str = "repo_summary_v1") -> str:
-    blob = json.dumps({"v": prompt_version, "context": context}, sort_keys=True, ensure_ascii=True)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+def _deterministic_summary(context: Dict[str, Any]) -> Dict[str, Any]:
+    counts = context.get("counts", {}) if isinstance(context.get("counts"), dict) else {}
+    files = int(counts.get("files", 0) or 0)
+    symbols = int(counts.get("symbols", 0) or 0)
+    calls = int(counts.get("calls", 0) or 0)
+    cycles_count = int(counts.get("cycles_count", 0) or 0)
+    unresolved = int(counts.get("unresolved_calls", 0) or 0)
+    orchestrators = context.get("orchestrators", []) if isinstance(context.get("orchestrators"), list) else []
+    critical = context.get("critical_apis", []) if isinstance(context.get("critical_apis"), list) else []
+    dead = context.get("dead_symbols", []) if isinstance(context.get("dead_symbols"), list) else []
+    hotspots = context.get("top_hotspots", []) if isinstance(context.get("top_hotspots"), list) else []
+
+    top_orchestrators = [str(item.get("fqn", "") or "") for item in orchestrators[:3] if isinstance(item, dict)]
+    top_critical = [str(item.get("fqn", "") or "") for item in critical[:3] if isinstance(item, dict)]
+    top_hotspot_labels = []
+    for item in hotspots[:3]:
+        if isinstance(item, dict):
+            top_hotspot_labels.append(str(item.get("fqn") or item.get("file") or "").strip())
+        elif isinstance(item, str):
+            top_hotspot_labels.append(item)
+    one_liner = f"Scanned {files} files, indexed {symbols} symbols, and resolved {calls} calls."
+    bullets: List[str] = []
+    if top_orchestrators:
+        bullets.append("Top orchestrators: " + ", ".join(top_orchestrators))
+    if top_critical:
+        bullets.append("Critical APIs: " + ", ".join(top_critical))
+    bullets.append(f"Dependency cycles: {cycles_count}")
+    if top_hotspot_labels:
+        bullets.append("Hotspots: " + ", ".join(top_hotspot_labels))
+    if unresolved:
+        bullets.append(f"Unresolved calls: {unresolved}")
+    if dead:
+        bullets.append("Dead symbols: " + ", ".join([str(x) for x in dead[:3]]))
+    if not bullets:
+        bullets.append("No major hotspots detected from cached architecture artifacts.")
+    notes = []
+    if cycles_count:
+        notes.append("Break dependency cycles first to reduce architecture friction.")
+    if hotspots:
+        notes.append("Review top hotspots before making broad refactors.")
+    return _normalize_summary({"one_liner": one_liner, "bullets": bullets, "notes": notes})
 
 
-def _normalize_summary(text: str) -> Dict[str, Any]:
-    raw_lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
-    lines: List[str] = []
-    for ln in raw_lines:
-        if ln.startswith("###"):
-            ln = ln.lstrip("# ")
-        if ln.lower().startswith("architecture explanation"):
-            continue
-        if not ln.startswith("-"):
-            ln = f"- {ln}"
-        lines.append(ln)
-    if not lines:
-        lines = ["- Repository summary unavailable."]
-    lines = lines[:7]
-    one = lines[0].lstrip("- ") if lines else "Repository summary unavailable."
-    bullets = [ln.lstrip("- ")[:120] for ln in lines[:7]]
-    return {"one_liner": one[:140], "bullets": bullets, "notes": []}
-
-
-def generate_repo_summary(repo_cache_dir: str, llm_client) -> dict:
+def generate_repo_summary(repo_cache_dir: str, llm_client=None) -> dict:
     context = build_repo_summary_context(repo_cache_dir)
-    key = _cache_key(context)
-
-    llm_cache_path = os.path.join(repo_cache_dir, "llm_cache.json")
-    llm_cache = _load_json(llm_cache_path, {})
-    if not isinstance(llm_cache, dict):
-        llm_cache = {}
-
-    cache_ns = f"repo_summary:{key}"
-    cached = llm_cache.get(cache_ns)
-    if isinstance(cached, dict):
-        summary = cached.get("summary", {}) if isinstance(cached.get("summary"), dict) else {}
-        return {
-            "ok": True,
-            "cached": True,
-            "provider": str(cached.get("provider", "") or ""),
-            "summary": summary,
-            "error": None,
-        }
-
-    prompt = (
-        "Give a concise repository architecture summary in plain text bullets (max 7 bullets).\n"
-        "Mention code style (script vs library), orchestration entrypoints, and key hotspots/cycles.\n"
-        "No markdown headings.\n\n"
-        f"Context JSON:\n{json.dumps(context, ensure_ascii=True)}"
-    )
-
-    ai_result = llm_client.complete_text(prompt)
-    if not isinstance(ai_result, dict) or not ai_result.get("ok"):
-        return {
-            "ok": False,
-            "cached": False,
-            "provider": str((ai_result or {}).get("provider", "") if isinstance(ai_result, dict) else ""),
-            "summary": {},
-            "error": (ai_result or {}).get("error", "AI generation failed") if isinstance(ai_result, dict) else "AI generation failed",
-        }
-
-    summary = _normalize_summary(str(ai_result.get("text", "") or ""))
-    summary["top_orchestrators"] = context.get("orchestrators", [])[:5]
-    summary["critical_apis"] = context.get("critical_apis", [])[:5]
-    summary["dependency_cycles"] = [
-        {"cycle": c, "kind": "module"} for c in (context.get("cycles", []) if isinstance(context.get("cycles"), list) else [])
-    ][:5]
-
-    llm_cache[cache_ns] = {
-        "provider": str(ai_result.get("provider", "") or ""),
-        "model": str(ai_result.get("model", "") or ""),
-        "summary": summary,
-    }
-    _save_json(llm_cache_path, llm_cache)
-
-    return {
+    summary = _deterministic_summary(context)
+    payload = {
         "ok": True,
         "cached": False,
-        "provider": str(ai_result.get("provider", "") or ""),
+        "provider": "deterministic",
         "summary": summary,
         "error": None,
     }
+    _save_json(os.path.join(repo_cache_dir, "repo_summary.json"), payload)
+    return payload

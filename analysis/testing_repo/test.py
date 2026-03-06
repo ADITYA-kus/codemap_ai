@@ -35,7 +35,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
 
-"""Module docstring: demo repo for CodeMap AI."""
+"""Module docstring: demo repo for CodeMap."""
 
 def introduction():
     """Prints an intro message."""
@@ -75,3 +75,4 @@ def r5(a, b):
 
 def r6():
     return str(123)
+

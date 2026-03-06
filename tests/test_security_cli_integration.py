@@ -3,11 +3,6 @@ import subprocess
 import sys
 import unittest
 
-from fastapi.testclient import TestClient
-
-from ui.app import app
-
-
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
@@ -58,27 +53,6 @@ class TestCliTokenSecurity(unittest.TestCase):
             except OSError:
                 continue
 
-    def test_ui_ai_status_does_not_expose_tokens(self):
-        token = "gsk_TESTTOKEN1234567890abcDEF"
-        os.environ["GROQ_API_KEY"] = token
-        try:
-            client = TestClient(app)
-            response = client.get("/api/ai/status")
-            self.assertEqual(response.status_code, 200)
-            text = response.text
-            self.assertNotIn(token, text)
-            self.assertIn('"ok":true', text.replace(" ", "").lower())
-        finally:
-            os.environ.pop("GROQ_API_KEY", None)
-
-        token_bytes = token.encode("utf-8")
-        for path in self._cache_files():
-            try:
-                with open(path, "rb") as f:
-                    data = f.read()
-                self.assertNotIn(token_bytes, data, msg=f"Token leaked in file: {path}")
-            except OSError:
-                continue
 
 
 if __name__ == "__main__":

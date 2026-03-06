@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodeMap AI UI</title>
+  <title>CodeMap UI</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="title">CodeMap AI</div>
+      <div class="title">CodeMap</div>
       <div class="repo-name-wrap">
         <div id="repo-name" class="repo-name">No repo selected</div>
         <span id="repo-private-badge" class="repo-badge private hidden">PRIVATE MODE</span>
@@ -18,9 +18,8 @@
     <div class="workspace-controls">
       <select id="repo-select" class="repo-select"></select>
       <button id="add-repo-btn" class="repo-btn" type="button">+ Add repo...</button>
-      <button id="ai-settings-btn" class="repo-btn" type="button">Settings</button>
+      <button id="ai-settings-btn" class="repo-btn" type="button" onclick="var m=document.getElementById('ai-settings-modal'); if(m){ m.classList.remove('hidden'); document.body.classList.add('modal-open'); }">Settings</button>
       <span id="repo-list-mode-pill" class="repo-badge">Session Mode</span>
-      <span id="ai-mode-badge" class="repo-badge">AI: OFF</span>
     </div>
     <div id="meta" class="meta">Loading...</div>
   </header>
@@ -73,7 +72,7 @@
   </section>
   <div id="ai-settings-modal" class="confirm-modal hidden">
     <div class="confirm-card settings-card">
-      <div class="section-title">AI Settings</div>
+      <div class="section-title">Settings</div>
       <div class="path">General</div>
       <label class="path">
         <input id="ai-settings-remember-repos" type="checkbox" />
@@ -83,28 +82,9 @@
         <button id="ai-settings-clear-repos" class="repo-btn danger" type="button">Clear repository list</button>
       </div>
       <div class="divider"></div>
-      <div class="path">Provider</div>
-      <label>Provider
-        <select id="ai-settings-provider">
-          <option value="none" selected>None</option>
-          <option value="gemini">Gemini</option>
-          <option value="groq">Groq</option>
-          <option value="xai">xAI</option>
-        </select>
-      </label>
-      <label>API key
-        <input id="ai-settings-key" type="password" placeholder="Used locally" />
-      </label>
-      <label>Model (optional)
-        <input id="ai-settings-model" type="text" placeholder="Leave empty for default" />
-      </label>
-      <label class="path"><input id="ai-settings-save-local" type="checkbox" checked /> Save locally on this machine</label>
-      <div id="ai-settings-status" class="status"></div>
+      <div id="ai-settings-status" class="status">CodeMap runs locally with deterministic summaries and analysis.</div>
       <div class="repo-row-actions">
-        <button id="ai-settings-test" class="repo-btn" type="button">Test Key</button>
-        <button id="ai-settings-save" class="repo-btn" type="button">Save</button>
-        <button id="ai-settings-clear" class="repo-btn danger" type="button">Clear key</button>
-        <button id="ai-settings-cancel" class="repo-btn" type="button">Cancel</button>
+        <button id="ai-settings-cancel" class="repo-btn" type="button">Close</button>
       </div>
     </div>
   </div>
@@ -152,7 +132,7 @@
         </label>
         <div id="auto-clean-note" class="path hidden">Removing from UI will also delete local cache.</div>
         <div class="path">Your analysis data is stored locally under .codemap_cache. You can delete it anytime.</div>
-        <div class="path">API keys are never saved to disk. BYOK keys live only in memory for a single request.</div>
+        <div class="path">CodeMap runs locally. Analysis data is cached on this machine only.</div>
         <div class="path">Retention cleanup runs locally; nothing is uploaded.</div>
         <div id="privacy-result" class="content muted"></div>
       </div>
@@ -244,7 +224,7 @@
   <script>
     window.CODEMAP_DEFAULT_REPO = "{{ default_repo }}";
   </script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260306b"></script>
 </body>
 </html>
 

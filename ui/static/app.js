@@ -5,7 +5,6 @@
   const repoSelectEl = document.getElementById("repo-select");
   const addRepoBtnEl = document.getElementById("add-repo-btn");
   const aiSettingsBtnEl = document.getElementById("ai-settings-btn");
-  const aiModeBadgeEl = document.getElementById("ai-mode-badge");
   const repoListModePillEl = document.getElementById("repo-list-mode-pill");
   const treeStatusEl = document.getElementById("tree-status");
   const treeEl = document.getElementById("tree");
@@ -72,22 +71,15 @@
   const confirmYesEl = document.getElementById("confirm-yes");
   const confirmNoEl = document.getElementById("confirm-no");
   const aiSettingsModalEl = document.getElementById("ai-settings-modal");
-  const aiSettingsProviderEl = document.getElementById("ai-settings-provider");
-  const aiSettingsKeyEl = document.getElementById("ai-settings-key");
-  const aiSettingsModelEl = document.getElementById("ai-settings-model");
-  const aiSettingsSaveLocalEl = document.getElementById("ai-settings-save-local");
+  const aiSettingsKeyEl = null;
   const aiSettingsRememberReposEl = document.getElementById("ai-settings-remember-repos");
   const aiSettingsClearReposEl = document.getElementById("ai-settings-clear-repos");
-  const aiSettingsTestEl = document.getElementById("ai-settings-test");
-  const aiSettingsSaveEl = document.getElementById("ai-settings-save");
-  const aiSettingsClearEl = document.getElementById("ai-settings-clear");
   const aiSettingsCancelEl = document.getElementById("ai-settings-cancel");
   const aiSettingsStatusEl = document.getElementById("ai-settings-status");
 
   const fileCache = new Map();
   const symbolCache = new Map();
   const symbolAiSummaryCache = new Map();
-  let symbolExplainAbortController = null;
   let repoDir = "";
   let repoName = "";
   let activeSymbolFqn = "";
@@ -110,7 +102,7 @@
   let aiEnabled = false;
   let aiProvider = "";
   let aiModel = "";
-  let aiStatusMessage = "AI summary is disabled. Open Settings -> AI to enable (optional).";
+  let aiStatusMessage = "AI is optional. Configure a provider and key to enable summaries and explanations.";
   let riskRadar = null;
   let riskRadarUpdatedAt = "";
   let riskRadarStatus = "idle"; // idle|loading|ready|missing|error
@@ -237,12 +229,6 @@
   }
 
   function updateAiModeUi() {
-    if (!aiModeBadgeEl) return;
-    if (aiEnabled) {
-      aiModeBadgeEl.textContent = `AI: BYOK (${(aiProvider || "auto").toUpperCase()})`;
-    } else {
-      aiModeBadgeEl.textContent = "AI: OFF";
-    }
   }
 
   function updateRepoListModeUi() {
@@ -256,18 +242,10 @@
   }
 
   async function loadAiStatus() {
-    try {
-      const data = await fetchJson("/api/settings/ai");
-      aiEnabled = !!data.configured;
-      aiProvider = String(data.provider || "none");
-      aiModel = String(data.model || "");
-      aiStatusMessage = String(data.message || "AI summary is disabled. Open Settings -> AI to enable (optional).");
-    } catch (_e) {
-      aiEnabled = false;
-      aiProvider = "none";
-      aiModel = "";
-      aiStatusMessage = "AI summary is disabled. Open Settings -> AI to enable (optional).";
-    }
+    aiEnabled = false;
+    aiProvider = "";
+    aiModel = "";
+    aiStatusMessage = "CodeMap runs fully without AI. Deterministic summaries are always available.";
     updateAiModeUi();
   }
 
@@ -282,21 +260,6 @@
     if (aiSettingsRememberReposEl) aiSettingsRememberReposEl.checked = !!rememberRepos;
   }
 
-  async function callAiEndpoint(action, payload) {
-    const body = {
-      action,
-      repo_hash: activeRepoHash || "",
-      repo: repoDir || "",
-      force: !!(payload && payload.force),
-      regenerate: !!(payload && payload.regenerate),
-      symbol: payload && payload.symbol ? String(payload.symbol) : "",
-    };
-    return fetchJson(`/api/ai/${action}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  }
 
   function setAiSettingsStatus(message, isError) {
     if (!aiSettingsStatusEl) return;
@@ -314,90 +277,22 @@
 
   async function openAiSettingsModal() {
     if (!aiSettingsModalEl) return;
-    await loadAiStatus();
-    await loadRegistryMode();
-    if (aiSettingsProviderEl) aiSettingsProviderEl.value = String(aiProvider || "none");
-    if (aiSettingsModelEl) aiSettingsModelEl.value = String(aiModel || "");
-    if (aiSettingsSaveLocalEl) aiSettingsSaveLocalEl.checked = true;
-    if (aiSettingsRememberReposEl) aiSettingsRememberReposEl.checked = !!rememberRepos;
-    if (aiSettingsKeyEl) aiSettingsKeyEl.value = "";
-    setAiSettingsStatus(aiEnabled ? "Configured." : "Not configured.", false);
     aiSettingsModalEl.classList.remove("hidden");
     document.body.classList.add("modal-open");
-  }
-
-  async function saveAiSettings() {
-    const provider = String(aiSettingsProviderEl && aiSettingsProviderEl.value ? aiSettingsProviderEl.value : "none").trim().toLowerCase();
-    const model = String(aiSettingsModelEl && aiSettingsModelEl.value ? aiSettingsModelEl.value : "").trim();
-    const saveLocal = !!(aiSettingsSaveLocalEl && aiSettingsSaveLocalEl.checked);
-    const apiKey = String(aiSettingsKeyEl && aiSettingsKeyEl.value ? aiSettingsKeyEl.value : "").trim();
+    if (aiSettingsRememberReposEl) aiSettingsRememberReposEl.checked = !!rememberRepos;
+    if (aiSettingsKeyEl) aiSettingsKeyEl.value = "";
+    setAiSettingsStatus("Loading settings...", false);
     try {
-      const headers = { "Content-Type": "application/json" };
-      if (apiKey) headers["X-CodeMap-LLM-Key"] = apiKey;
-      const data = await fetchJson("/api/settings/ai", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          provider,
-          model,
-          save_local: saveLocal,
-        }),
-      });
-      if (aiSettingsKeyEl) aiSettingsKeyEl.value = "";
-      setAiSettingsStatus(data.configured ? "Saved." : "AI disabled.", false);
-      await loadAiStatus();
-      closeAiSettingsModal();
-      showToast(data.configured ? `AI settings saved (${String(data.provider || "none").toUpperCase()})` : "AI disabled", "success");
+      await loadRegistryMode();
+      if (aiSettingsRememberReposEl) aiSettingsRememberReposEl.checked = !!rememberRepos;
+      setAiSettingsStatus("CodeMap runs fully without AI. Deterministic summaries are always available.", false);
     } catch (e) {
-      setAiSettingsStatus((e && (e.message || e.error)) || "Failed to save settings.", true);
-      showToast(redactSecrets((e && (e.message || e.error)) || "Failed to save settings."), "error");
-    } finally {
-      if (aiSettingsKeyEl) aiSettingsKeyEl.value = "";
+      setAiSettingsStatus(redactSecrets((e && (e.message || e.error)) || "Failed to load settings."), true);
     }
   }
 
-  async function testAiSettings() {
-    const provider = String(aiSettingsProviderEl && aiSettingsProviderEl.value ? aiSettingsProviderEl.value : "none").trim().toLowerCase();
-    const apiKey = String(aiSettingsKeyEl && aiSettingsKeyEl.value ? aiSettingsKeyEl.value : "").trim();
-    const model = String(aiSettingsModelEl && aiSettingsModelEl.value ? aiSettingsModelEl.value : "").trim();
-    if (!provider || provider === "none") {
-      setAiSettingsStatus("Select provider first.", true);
-      return;
-    }
-    if (!apiKey) {
-      setAiSettingsStatus("Add your API key for one-time test.", true);
-      return;
-    }
-    try {
-      const data = await fetchJson("/api/settings/ai/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CodeMap-LLM-Key": apiKey },
-        body: JSON.stringify({ provider, model }),
-      });
-      setAiSettingsStatus((data.message || "Credentials look valid.") + " Click Save to apply.", false);
-      showToast("AI key test passed", "success");
-    } catch (e) {
-      const msg = redactSecrets((e && (e.message || e.error)) || "AI key test failed.");
-      setAiSettingsStatus(msg, true);
-      showToast(msg, "error");
-    }
-  }
 
-  async function clearAiSettings() {
-    try {
-      await fetchJson("/api/settings/ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "none", model: "", save_local: true }),
-      });
-      if (aiSettingsKeyEl) aiSettingsKeyEl.value = "";
-      await loadAiStatus();
-      closeAiSettingsModal();
-      showToast("AI settings cleared", "success");
-    } catch (e) {
-      showToast(redactSecrets((e && (e.message || e.error)) || "Failed to clear settings."), "error");
-    }
-  }
+
 
   async function setRememberRepos(value) {
     const remember = !!value;
@@ -671,20 +566,17 @@
 
   function repoSummarySection() {
     const cmd = `python cli.py api repo_summary --repo ${repoName || "<repo>"}`;
-    const modeLabel = aiEnabled ? `BYOK (${aiProvider || "auto"})` : "OFF";
     const controls = `
       <div class="repo-row-actions">
-        <button id='repo-summary-view' class='repo-refresh-btn' type='button'>View cached summary</button>
-        <button id='repo-summary-regen' class='repo-refresh-btn' type='button' ${aiEnabled ? "" : "disabled"}>Regenerate AI summary</button>
-        <label class="path"><input id="repo-summary-force" type="checkbox" /> Force regenerate</label>
+        <button id='repo-summary-view' class='repo-refresh-btn' type='button'>View summary</button>
+        <button id='repo-summary-regen' class='repo-refresh-btn' type='button'>Regenerate summary</button>
       </div>
-      <div class="path">AI Mode: ${esc(modeLabel)}</div>
     `;
     if (repoSummaryStatus === "loading") {
       return `<div class="card"><div class="section-title">Repo Summary</div>${controls}<div class="path">Loading summary...</div></div>`;
     }
     if (repoSummaryStatus === "disabled") {
-      return `<div class="card arch-missing"><div class="section-title">Repo Summary</div>${controls}<div>AI disabled: set provider + key in Settings.</div></div>`;
+      return `<div class="card arch-missing"><div class="section-title">Repo Summary</div>${controls}<div>Summary unavailable.</div></div>`;
     }
     if (repoSummaryStatus === "missing") {
       return `<div class="card arch-missing"><div class="section-title">Repo Summary</div>${controls}<div>No cached summary for current analysis. Click Regenerate.</div><div class="path">${esc(cmd)}</div></div>`;
@@ -710,7 +602,7 @@
         <div class="arch-one-liner">${esc(summary.one_liner || "")}</div>
         ${bullets.length ? `<ul class="arch-bullets">${bullets.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>` : "<div class='muted'>No bullets available.</div>"}
         ${notes.length ? `<div class="section-title">Notes</div><ul class="arch-bullets">${notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
-        <div class="path">provider: ${esc(payload.provider || "none")} | cached: ${esc(String(payload.cached))} | updated: ${esc(payload.cached_at || payload.generated_at || repoSummaryUpdatedAt || "unknown")}</div>
+        <div class="path">source: deterministic | cached: ${esc(String(payload.cached))} | updated: ${esc(payload.cached_at || payload.generated_at || repoSummaryUpdatedAt || "unknown")}</div>
       </div>
     `;
   }
@@ -743,19 +635,12 @@
         if (state.outdated) {
           repoSummary = null;
           repoSummaryUpdatedAt = "";
-          repoSummaryStatus = aiEnabled ? "stale" : "disabled";
+          repoSummaryStatus = "stale";
           return;
         }
         repoSummary = null;
         repoSummaryUpdatedAt = "";
-        repoSummaryStatus = aiEnabled ? "missing" : "disabled";
-        return;
-      }
-
-      if (!aiEnabled) {
-        repoSummary = null;
-        repoSummaryStatus = "disabled";
-        repoSummaryError = aiStatusMessage || "AI summary is disabled. Open Settings -> AI to enable (optional).";
+        repoSummaryStatus = "missing";
         return;
       }
 
@@ -765,8 +650,6 @@
         body: JSON.stringify({ repo_hash: activeRepoHash || "", repo: repoDir || "", force: !!force }),
       });
       const generated = data.repo_summary || {};
-      aiProvider = String(generated.provider || aiProvider || "");
-      aiModel = String(generated.model || aiModel || "");
       repoSummary = {
         provider: String(generated.provider || ""),
         model: String(generated.model || ""),
@@ -785,7 +668,6 @@
         repoSummaryError = "";
       } else if (e && e.error === "AI_DISABLED") {
         repoSummaryStatus = "disabled";
-        repoSummaryError = aiStatusMessage || "AI summary is disabled. Open Settings -> AI to enable (optional).";
       } else {
         repoSummaryStatus = "error";
         repoSummaryError = redactSecrets((e && (e.message || e.error)) || "Repo summary load failed");
@@ -975,7 +857,7 @@
       const errCode = String((e && e.error) || "");
       if (errCode === "MISSING_ARCHITECTURE_CACHE" || errCode === "CACHE_NOT_FOUND") {
         architectureViewEl.classList.remove("muted");
-        architectureViewEl.innerHTML = renderMissingAnalysisCta("Run Analyze first to unlock Architecture AI summaries.");
+        architectureViewEl.innerHTML = renderMissingAnalysisCta("Run Analyze first to unlock architecture insights.");
         bindRunAnalysisNowButton();
         return;
       }
@@ -2140,26 +2022,6 @@
     if (aiSettingsCancelEl) {
       aiSettingsCancelEl.addEventListener("click", () => closeAiSettingsModal());
     }
-    if (aiSettingsSaveEl) {
-      aiSettingsSaveEl.addEventListener("click", async () => {
-        await saveAiSettings();
-      });
-    }
-    if (aiSettingsProviderEl) {
-      aiSettingsProviderEl.addEventListener("change", () => {
-        if (aiSettingsKeyEl) aiSettingsKeyEl.value = "";
-      });
-    }
-    if (aiSettingsTestEl) {
-      aiSettingsTestEl.addEventListener("click", async () => {
-        await testAiSettings();
-      });
-    }
-    if (aiSettingsClearEl) {
-      aiSettingsClearEl.addEventListener("click", async () => {
-        await clearAiSettings();
-      });
-    }
     if (aiSettingsRememberReposEl) {
       aiSettingsRememberReposEl.addEventListener("change", async () => {
         await setRememberRepos(!!aiSettingsRememberReposEl.checked);
@@ -2667,63 +2529,6 @@
     return items.map(renderer).join("");
   }
 
-  async function refreshSymbolAiSummary(fqn, options) {
-    const key = String(fqn || "");
-    if (!key) return;
-    const opts = options || {};
-    const regenerate = !!opts.regenerate;
-    const force = !!opts.force;
-    const cancelOnly = !!opts.cancelOnly;
-    if (cancelOnly) {
-      if (symbolExplainAbortController) {
-        symbolExplainAbortController.abort();
-        symbolExplainAbortController = null;
-      }
-      return;
-    }
-    if (symbolExplainAbortController) {
-      symbolExplainAbortController.abort();
-      symbolExplainAbortController = null;
-    }
-    symbolExplainAbortController = new AbortController();
-    try {
-      const data = await fetchJson("/api/symbol/explain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repo_hash: activeRepoHash || "",
-          repo: repoDir || "",
-          symbol: key,
-          force: regenerate ? force : false,
-        }),
-        signal: symbolExplainAbortController.signal,
-      });
-      symbolAiSummaryCache.set(key, {
-        text: String(data.explanation_markdown || "").trim(),
-        provider: String(data.provider || ""),
-        cached: !!data.cached,
-        updatedAt: String(data.created_at || new Date().toISOString()),
-      });
-      if (activeSymbolFqn === key) {
-        symbolCache.delete(key);
-        await loadSymbol(key);
-      }
-      showToast(regenerate ? (data.cached ? "Using cached explanation" : "Explanation refreshed") : (data.cached ? "Loaded cached explanation" : "Explanation generated"), "success");
-    } catch (e) {
-      if (e && e.name === "AbortError") {
-        showToast("Explanation request cancelled.", "success");
-        return;
-      }
-      const errCode = String((e && e.error) || "");
-      if (errCode === "LLM_NOT_CONFIGURED") {
-        showToast("To enable AI explanations, set CODEMAP_LLM and provider API key in server env, then restart UI server.", "error");
-        return;
-      }
-      showToast(redactSecrets((e && (e.message || e.error)) || "AI summary refresh failed"), "error");
-    } finally {
-      symbolExplainAbortController = null;
-    }
-  }
 
   async function loadSymbol(fqn) {
     activeSymbolFqn = fqn;
@@ -2735,46 +2540,29 @@
       const symbolPromise = (async () => {
         let symbolData = symbolCache.get(fqn);
         if (!symbolData) {
-          symbolData = await fetchJson(`/api/symbol/info?symbol=${encodeURIComponent(fqn)}&repo=${encodeURIComponent(repoDir || "")}`);
+          symbolData = await fetchJson(`/api/symbol?fqn=${encodeURIComponent(fqn)}`);
           symbolCache.set(fqn, symbolData);
         }
         return symbolData;
       })();
 
       const [symbolData] = await Promise.all([symbolPromise, delay(150)]);
-      const result = symbolData.symbol || {};
-      const symbolQualified = String(result.qualified || fqn);
-      const relFile = relPath(result.file_path || "");
+
+      const result = symbolData.result || {};
+      const loc = result.location || {};
+      const relFile = relPath(loc.file || "");
       if (relFile && relFile !== activeFilePath) {
         await loadFile(relFile);
       }
 
-      const aiSummary = symbolAiSummaryCache.get(symbolQualified);
-      const summary = stripMarkdown((aiSummary && aiSummary.text) || "");
-      const aiSummaryStatus = aiSummary
-        ? `provider: ${aiSummary.provider || "none"} | cached: ${String(!!aiSummary.cached)} | updated: ${aiSummary.updatedAt || "unknown"}`
-        : "No cached explanation yet. Click Explain (AI).";
-
-      const symbolParts = parseSymbolParts(symbolQualified);
-      const locationText = `${relFile || "unknown"}:${result.line_start || ""}-${result.line_end || ""}`;
-      const calledBy = (Array.isArray(result.callers) ? result.callers : [])
-        .filter((c) => c && c.qualified)
-        .slice()
-        .sort((a, b) => (a.file || "").localeCompare(b.file || ""));
-      const calls = (Array.isArray(result.callees) ? result.callees : [])
-        .filter((c) => c && c.qualified)
-        .map((c) => ({
-          name: shortLabel(c.qualified),
-          fqn: c.qualified,
-          count: 1,
-          clickable: !String(c.qualified).startsWith("builtins."),
-          file: c.file || "",
-          line: c.line || "",
-        }));
-      const usedIn = calledBy;
-      const signature = String(result.signature || "").trim();
-      const docstring = String(result.docstring || "").trim();
-      const kind = String(result.kind || "unknown");
+      const summary = stripMarkdown(result.one_liner || "");
+      const notes = (result.details || []).filter((d) => String(d).startsWith("Returns:")).slice(0, 3).map(stripMarkdown);
+      const symbolParts = parseSymbolParts(result.fqn || fqn);
+      const locationText = `${relFile}:${loc.start_line || ""}`;
+      const connections = result.connections || {};
+      const calledBy = connections.called_by || [];
+      const calls = connections.calls || [];
+      const usedIn = (connections.used_in || []).slice().sort((a, b) => (a.file || "").localeCompare(b.file || ""));
 
       const crumbs = [
         { label: repoName || "repo", action: "repo", value: "" },
@@ -2783,7 +2571,7 @@
       if (symbolParts.className) {
         crumbs.push({ label: symbolParts.className, action: "class", value: symbolParts.className });
       }
-      crumbs.push({ label: symbolParts.symbol, action: "symbol", value: symbolQualified });
+      crumbs.push({ label: symbolParts.symbol, action: "symbol", value: result.fqn || fqn });
 
       symbolViewEl.innerHTML = `
         <div class="card symbol-card fade-panel">
@@ -2796,27 +2584,16 @@
             <button class="chip" data-target="used-in-section">Used in: ${usedIn.length}</button>
           </div>
           <div class="symbol-title-main">${esc(symbolParts.display)}</div>
-          <div class="path">Qualified: ${esc(symbolQualified)}</div>
-          <div class="path">Kind: ${esc(kind)}</div>
+          <div class="path">FQN: ${esc(result.fqn || fqn)}</div>
           <div class="path">${esc(locationText)}</div>
-          ${signature ? `<div class="path">Signature: <code>${esc(signature)}</code></div>` : ""}
-          ${docstring ? `<div class="path">Docstring: ${esc(docstring)}</div>` : "<div class='path muted'>Docstring: none</div>"}
           <div class="divider"></div>
-          <div class="section-title">Explanation</div>
-          <div class="repo-row-actions">
-            <button id="symbol-ai-view-btn" class="repo-btn small" type="button">Explain (AI)</button>
-            <button id="symbol-ai-regen-btn" class="repo-btn small" type="button" ${aiEnabled ? "" : "disabled"}>Refresh explanation</button>
-            <button id="symbol-ai-cancel-btn" class="repo-btn small" type="button">Cancel</button>
-            <label class="path"><input id="symbol-ai-force" type="checkbox" /> Force regenerate</label>
-          </div>
-          <div class="path">AI Mode: ${esc(aiEnabled ? `BYOK (${aiProvider || "auto"})` : "OFF")} | ${esc(aiSummaryStatus)}</div>
-          ${!aiEnabled ? "<div class='path muted'>To enable AI explanations, set CODEMAP_LLM and provider API key in server environment, then restart UI server.</div>" : ""}
-          ${summary ? `<div>${esc(summary)}</div>` : "<div class='muted'>No explanation loaded.</div>"}
+          <div class="section-title">Summary</div>
+          <div>${esc(summary)}</div>
           <div id="called-by-section" class="divider"></div>
           <div class="section-title">Called by</div>
           ${renderConnectionBlock(calledBy, (c) => `
             <div>
-              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.qualified)}">${esc(c.qualified)}</span>
+              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.fqn)}">${esc(c.fqn)}</span>
               <span class="path">${esc(c.file)}:${esc(c.line)}</span>
             </div>
           `, "No callers found")}
@@ -2828,7 +2605,7 @@
                 ? `<span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.fqn)}">${esc(c.name)}</span>`
                 : `<span class="connection-muted">${esc(c.name)}</span>`
               }
-              <span class="path">${esc(c.file)}:${esc(c.line)}</span>
+              <span class="path">(${esc(c.count)}x)</span>
             </div>
           `, "No calls found")}
           <div class="divider"></div>
@@ -2836,65 +2613,33 @@
           ${renderConnectionBlock(calls.slice(0, 10), (c) => `
             <div>
               <span class="${c.clickable ? "connection-link" : "connection-muted"}" ${c.clickable ? `data-fqn="${esc(c.fqn)}"` : ""}>${esc(c.name)}</span>
+              <span class="path">(${esc(c.count)}x)</span>
             </div>
           `, "No callees found")}
           <div id="used-in-section" class="divider"></div>
           <div class="section-title">Used in</div>
           ${renderConnectionBlock(usedIn, (u) => `
             <div>
-              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(u.qualified)}">${esc(u.qualified)}</span>
+              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(u.fqn)}">${esc(u.fqn)}</span>
               <span class="path">${esc(u.file)}:${esc(u.line)}</span>
             </div>
           `, "No usages found")}
+          <div class="divider"></div>
+          <div class="section-title">Notes</div>
+          ${notes.length ? notes.map((n) => `<div>${esc(n)}</div>`).join("") : "<div class='muted'>None</div>"}
         </div>
       `;
 
       bindConnectionLinks(symbolViewEl);
-      bindBreadcrumbs(symbolViewEl, symbolQualified);
+      bindBreadcrumbs(symbolViewEl, result.fqn || fqn);
       bindConnectionChips(symbolViewEl);
-
-      const viewBtn = symbolViewEl.querySelector("#symbol-ai-view-btn");
-      if (viewBtn) {
-        viewBtn.addEventListener("click", async () => {
-          viewBtn.disabled = true;
-          viewBtn.textContent = "Loading...";
-          try {
-            await refreshSymbolAiSummary(symbolQualified, { regenerate: false, force: false });
-          } finally {
-            viewBtn.disabled = false;
-            viewBtn.textContent = "Explain (AI)";
-          }
-        });
-      }
-      const regenBtn = symbolViewEl.querySelector("#symbol-ai-regen-btn");
-      if (regenBtn) {
-        regenBtn.addEventListener("click", async () => {
-          const forceEl = symbolViewEl.querySelector("#symbol-ai-force");
-          const force = !!(forceEl && forceEl.checked);
-          regenBtn.disabled = true;
-          regenBtn.textContent = "Refreshing...";
-          try {
-            await refreshSymbolAiSummary(symbolQualified, { regenerate: true, force });
-          } finally {
-            regenBtn.disabled = false;
-            regenBtn.textContent = "Refresh explanation";
-          }
-        });
-      }
-      const cancelBtn = symbolViewEl.querySelector("#symbol-ai-cancel-btn");
-      if (cancelBtn) {
-        cancelBtn.addEventListener("click", async () => {
-          await refreshSymbolAiSummary(symbolQualified, { cancelOnly: true });
-        });
-      }
-
       highlightActiveSymbol();
-      await updateUiState({ opened_symbol: symbolQualified, last_symbol: symbolQualified });
+      await updateUiState({ opened_symbol: (result.fqn || fqn), last_symbol: (result.fqn || fqn) });
       if (activeTab === "graph" && graphParams().mode === "symbol") {
-        await loadGraph(symbolQualified);
+        await loadGraph(result.fqn || fqn);
       }
       if (activeTab === "impact") {
-        await loadImpact(symbolQualified);
+        await loadImpact(result.fqn || fqn);
       }
     } catch (e) {
       const errCode = String((e && e.error) || "");
@@ -2945,7 +2690,6 @@
     bindGraphControls();
     setActiveTab("details");
     try {
-      await loadAiStatus();
       await loadWorkspace();
       await refreshForActiveRepo();
     } catch (e) {
