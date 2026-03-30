@@ -5,15 +5,46 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codemap-ai"
 version = "0.1.0"
-description = "CodeMap local dashboard and CLI"
+description = "Local Python code analysis tool - understand architecture, dependencies, and call graphs"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "ADITYA", email = "your-email@example.com"}
+]
+keywords = [
+  "code-analysis",
+  "python",
+  "architecture",
+  "call-graph",
+  "cli",
+  "dashboard",
+  "local",
+  "privacy",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: System :: Analysis",
+]
 dependencies = [
   "fastapi>=0.110",
   "uvicorn>=0.23",
   "jinja2>=3.1",
   "requests>=2.31",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ADITYA-kus/codemap_ai"
+Repository = "https://github.com/ADITYA-kus/codemap_ai.git"
+Issues = "https://github.com/ADITYA-kus/codemap_ai/issues"
+Documentation = "https://github.com/ADITYA-kus/codemap_ai#readme"
 
 [project.scripts]
 codemap = "codemap_cli:main"
