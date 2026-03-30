@@ -216,68 +216,13 @@ codemap api impact --path <repo_path> --target "module.function"
 
 ---
 
-## Common Errors & Troubleshooting
 
-### ❌ **Error: "codemap: command not found"**
-**Cause:** Package not installed
 
-**Solution:**
-```bash
-pip install -e .
-codemap --help  # Verify it works
-```
 
-### ❌ **Error: "invalid non-printable character U+FEFF"**
-**Cause:** Running `codemap analyze` WITHOUT the required `--path` argument
 
-**WRONG (causes error):**
-```bash
-codemap analyze
-# Error: invalid non-printable character U+FEFF
-```
 
-**CORRECT (use --path):**
-```bash
-codemap analyze --path demo_repo
-codemap analyze --path ./my_project
-codemap analyze --path C:\Users\YourName\my_python_project
-```
 
-### ❌ **Error: "Repository not analyzed yet"**
-**Cause:** Trying to view results before analyzing
 
-**Solution:** Run analysis first:
-```bash
-codemap analyze --path <repo_path>
-codemap dashboard --port 8000  # Then view it
-```
-
-### ❌ **Error: "Port 8000 already in use"**
-**Cause:** Another application is using that port
-
-**Solution:** Use a different port:
-```bash
-codemap dashboard --port 8001
-codemap open --port 8001
-```
-
-### ❌ **Error: "GitHub token not working"**
-**Causes & Solutions:**
-- Token doesn't have `repo` scope → Generate a new one with proper scope
-- Token is expired → Generate a new token
-- Token on private repo → Make sure token has `repo` scope
-- Still failing? → Try: `codemap analyze --github <url> --token YOUR_TOKEN --refresh`
-
-### ❌ **Error: "No Python files found"**
-**Cause:** Directory doesn't contain Python code
-
-**Solution:** Make sure directory has `.py` files:
-```bash
-ls <your_repo>        # Check if .py files exist
-codemap analyze --path <your_repo>
-```
-
----
 
 ## Privacy & Security
 
