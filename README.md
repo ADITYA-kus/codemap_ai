@@ -20,9 +20,9 @@
 ### Step 1️⃣: Install CodeMap
 
 ```bash
-# Clone or download the repository
-git clone https://github.com/yourusername/codemap_ai_clean.git
-cd codemap_ai_clean
+# Clone the repository
+git clone https://github.com/ADITYA-kus/codemap_ai.git
+cd codemap_ai
 
 # Install as a local package
 pip install -e .
@@ -42,11 +42,11 @@ usage: codemap [-h] {analyze,dashboard,open,cache} ...
 
 ### Step 2️⃣: Analyze Your First Repository
 
-Try with the included demo:
+**IMPORTANT:** The `analyze` command REQUIRES the `--path` argument pointing to a directory!
 
 ```bash
 # Analyze the demo repo (takes 5-10 seconds)
-codemap api analyze --path demo_repo
+codemap analyze --path demo_repo
 ```
 
 **Output: JSON analysis data**
@@ -59,9 +59,14 @@ codemap api analyze --path demo_repo
 }
 ```
 
-Or **analyze your own code**:
+**Analyze your own Python project:**
 ```bash
-codemap api analyze --path /path/to/your/python/project
+codemap analyze --path /path/to/your/python/project
+```
+
+**Analyze a GitHub repository:**
+```bash
+codemap analyze --github https://github.com/owner/repo
 ```
 
 ---
@@ -69,8 +74,8 @@ codemap api analyze --path /path/to/your/python/project
 ### Step 3️⃣: View in Web Dashboard
 
 ```bash
-# Start the dashboard
-codemap ui --port 8000
+# Start the web dashboard
+codemap dashboard --port 8000
 ```
 
 **Open in browser:**
@@ -89,48 +94,68 @@ You'll see:
 
 ## Common Commands
 
-### Analyze & View
+### Analyze Commands
 ```bash
-# Analyze a repository
-codemap api analyze --path <repo_directory>
+# ⚠️ REQUIRED: Analyze needs --path argument!
 
-# Start web dashboard
-codemap ui --port 8000
+# Analyze a local repository
+codemap analyze --path <repo_directory>
+
+# Analyze a GitHub repository (public)
+codemap analyze --github https://github.com/owner/repo
+
+# Analyze private GitHub repo (requires token)
+codemap analyze --github https://github.com/owner/private-repo --token YOUR_GITHUB_TOKEN
+
+# Force rebuild analysis (ignore cache)
+codemap analyze --path <repo_directory> --rebuild
+
+# Use API for detailed JSON output
+codemap api analyze --path <repo_directory>
+```
+
+### Dashboard Commands
+```bash
+# Start web dashboard (default: localhost:8000)
+codemap dashboard --port 8000
+
+# Start dashboard with auto-reload (development)
+codemap dashboard --port 8000 --reload
 
 # Open dashboard in browser
-codemap open
+codemap open --port 8000
 ```
 
 ### Cache Management
 ```bash
-# List all analyzed repos
+# List all analyzed repositories
 codemap cache list
 
-# View cache details
+# Show cache details for a repository
 codemap cache info <repo_hash>
 
-# Clear specific cache
+# Clear a specific repository's cache
 codemap cache clear <repo_hash>
 
-# Clear all caches
-codemap cache clear --all
+# Show cache retention policy
+codemap cache retention <repo_hash>
+
+# Sweep expired caches (auto-cleanup)
+codemap cache sweep
 ```
 
-### Analyze GitHub Repositories
-```bash
-# Analyze a public GitHub repo (will download it)
-codemap api analyze --github https://github.com/owner/repo
-
-# Analyze a private repo (requires GitHub token)
-codemap api analyze --github https://github.com/owner/repo --token YOUR_GITHUB_TOKEN
-```
-
-**Get GitHub Token:**
+**Get GitHub Token (for private repos):**
 1. Go to https://github.com/settings/tokens
-2. Click "Generate new token"
-3. Select `repo` scope
-4. Copy the token
-5. Use in commands: `--token YOUR_TOKEN`
+2. Click "Generate new token" → "Generate new token (classic)"
+3. Give it a name (e.g., "CodeMap")
+4. Select **`repo`** scope (full control of private repos)
+5. Copy the token and save it somewhere safe
+6. Use in commands: `--token ghp_xxxxx`
+
+**Or pass token via stdin (more secure):**
+```bash
+echo "YOUR_TOKEN" | codemap analyze --github https://github.com/owner/repo --token-stdin
+```
 
 ---
 
@@ -164,56 +189,93 @@ codemap_ai_clean/
 Find all functions, classes, and methods in your codebase:
 
 ```bash
-codemap api search --repo <analyzed_repo_path> --query "class_name"
+codemap api search --path <repo_path> --query "MyClass"
+codemap api search --path <repo_path> --query "function_name"
 ```
 
 ### 📊 Call Graph
 Understand how functions call each other:
 
 ```bash
-codemap api explain --repo <repo_path> --symbol "module.ClassName.method"
+codemap api explain --path <repo_path> --symbol "module.ClassName.method"
 ```
 
 ### ⚠️ Risk Radar
 Detect complex code patterns and potential issues:
 
 ```bash
-codemap api risk_radar --repo <repo_path>
+codemap api risk_radar --path <repo_path>
 ```
 
 ### 📈 Impact Analysis
 See which files/functions are affected by changes:
 
 ```bash
-codemap api impact --repo <repo_path> --target "module.function"
+codemap api impact --path <repo_path> --target "module.function"
 ```
 
 ---
 
-## Troubleshooting
+## Common Errors & Troubleshooting
 
-### **"codemap: command not found"**
-Make sure you installed the package:
+### ❌ **Error: "codemap: command not found"**
+**Cause:** Package not installed
+
+**Solution:**
 ```bash
 pip install -e .
+codemap --help  # Verify it works
 ```
 
-### **"Repository not analyzed yet"**
-Run analysis first:
+### ❌ **Error: "invalid non-printable character U+FEFF"**
+**Cause:** Running `codemap analyze` WITHOUT the required `--path` argument
+
+**WRONG (causes error):**
 ```bash
-codemap api analyze --path <repo_path>
+codemap analyze
+# Error: invalid non-printable character U+FEFF
 ```
 
-### **Port 8000 already in use**
-Use a different port:
+**CORRECT (use --path):**
 ```bash
-codemap ui --port 8001
+codemap analyze --path demo_repo
+codemap analyze --path ./my_project
+codemap analyze --path C:\Users\YourName\my_python_project
 ```
 
-### **GitHub token not working**
-- Verify token has `repo` scope
-- Make sure it's not expired
-- Try: `codemap api analyze --github <url> --token YOUR_TOKEN --refresh`
+### ❌ **Error: "Repository not analyzed yet"**
+**Cause:** Trying to view results before analyzing
+
+**Solution:** Run analysis first:
+```bash
+codemap analyze --path <repo_path>
+codemap dashboard --port 8000  # Then view it
+```
+
+### ❌ **Error: "Port 8000 already in use"**
+**Cause:** Another application is using that port
+
+**Solution:** Use a different port:
+```bash
+codemap dashboard --port 8001
+codemap open --port 8001
+```
+
+### ❌ **Error: "GitHub token not working"**
+**Causes & Solutions:**
+- Token doesn't have `repo` scope → Generate a new one with proper scope
+- Token is expired → Generate a new token
+- Token on private repo → Make sure token has `repo` scope
+- Still failing? → Try: `codemap analyze --github <url> --token YOUR_TOKEN --refresh`
+
+### ❌ **Error: "No Python files found"**
+**Cause:** Directory doesn't contain Python code
+
+**Solution:** Make sure directory has `.py` files:
+```bash
+ls <your_repo>        # Check if .py files exist
+codemap analyze --path <your_repo>
+```
 
 ---
 
@@ -238,46 +300,128 @@ codemap ui --port 8001
 
 ## Example Workflow
 
+### Local Project Analysis
 ```bash
-# 1. Clone a Python project
-git clone https://github.com/some/project
-cd project
+# 1. Navigate to your Python project
+cd C:\Users\YourName\my_python_project
 
 # 2. Analyze it with CodeMap
-codemap api analyze --path .
+codemap analyze --path .
+# ✅ Analysis complete! Results cached locally
 
-# 3. Start the dashboard
-codemap ui --port 8000
+# 3. Start the web dashboard
+codemap dashboard --port 8000
+# ✅ Dashboard running at http://127.0.0.1:8000
 
-# 4. Open browser and explore
-# http://127.0.0.1:8000
+# 4. Open in browser
+codemap open --port 8000
 
-# 5. Search for a specific class
-codemap api search --repo . --query "MyClass"
+# 5. Explore in browser:
+#    - View all repositories
+#    - See call graphs
+#    - Check architecture metrics
+#    - View risk analysis
 
-# 6. Check call graph for a function
-codemap api explain --repo . --symbol "module.MyClass.method"
+# 6. Search for a specific class
+codemap api search --path . --query "MyClass"
+
+# 7. Check call graph for a function
+codemap api explain --path . --symbol "mymodule.MyClass.method"
+```
+
+### GitHub Repository Analysis
+```bash
+# 1. Analyze a public GitHub repo
+codemap analyze --github https://github.com/owner/awesome-project
+# ✅ Downloaded and analyzed
+
+# 2. View in dashboard
+codemap dashboard --port 8000
+codemap open --port 8000
+
+# 3. Clean up old repos
+codemap cache list      # See all cached repos
+codemap cache sweep    # Auto-cleanup old ones
 ```
 
 ---
 
 ## Next Steps
 
-- 📚 [Check the demo repo](demo_repo/) for an example
-- 🧪 Try analyzing different Python projects
-- 📊 Explore the dashboard features
-- 🔗 Use GitHub URLs to analyze public repos
+1. 🎯 **First analysis** - Try the demo:
+   ```bash
+   codemap analyze --path demo_repo
+   ```
+
+2. 📊 **View results** - Open the dashboard:
+   ```bash
+   codemap dashboard --port 8000
+   ```
+
+3. 📁 **Analyze your code** - Point to your project:
+   ```bash
+   codemap analyze --path ~/my-project
+   ```
+
+4. 🔗 **Try GitHub** - Analyze public repos:
+   ```bash
+   codemap analyze --github https://github.com/owner/repo
+   ```
+
+5. 🚀 **Advanced features** - Explore search, impact, risk analysis:
+   ```bash
+   codemap api search --path . --query "YourClass"
+   ```
 
 ---
 
-## Support
+## Quick Reference
 
-- Check error messages - they're usually clear
-- Verify Python 3.10+ installed: `python --version`
-- Verify pip: `pip --version`
-- Check repo path exists and contains `.py` files
+```bash
+# Installation
+pip install -e .
+
+# Most common commands
+codemap analyze --path <directory>              # Analyze local repo
+codemap analyze --github <url>                  # Analyze GitHub repo
+codemap dashboard --port 8000                   # Start dashboard
+codemap open --port 8000                        # Open in browser
+codemap cache list                              # List all analyses
+codemap cache clear <hash>                      # Delete one analysis
+```
+
+---
+
+## Support & Help
+
+✅ **Run without arguments** to see all available commands:
+```bash
+codemap --help
+codemap analyze --help
+codemap dashboard --help
+codemap api --help
+```
+
+✅ **Check requirements:**
+```bash
+python --version          # Should be 3.10+
+pip --version             # Should be installed
+git --version             # For GitHub repos
+```
+
+✅ **Verify repo path:**
+```bash
+# Make sure your repo has Python files
+dir <your_repo>                 # Windows
+ls <your_repo>                  # Linux/Mac
+find <your_repo> -name "*.py"   # Find Python files
+```
 
 ---
 
 **Happy coding! 🚀**
+
+---
+
+**GitHub:** https://github.com/ADITYA-kus/codemap_ai
 
