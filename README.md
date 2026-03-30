@@ -20,12 +20,8 @@
 ### Step 1️⃣: Install CodeMap
 
 ```bash
-# Clone the repository
-git clone https://github.com/ADITYA-kus/codemap_ai.git
-cd codemap_ai
-
-# Install as a local package
-pip install -e .
+# Install from PyPI (easiest)
+pip install codemap-python
 ```
 
 **Verify installation:**
@@ -37,6 +33,13 @@ You should see:
 ```
 usage: codemap [-h] {analyze,dashboard,open,cache} ...
 ```
+
+> **For developers:** To modify source code or contribute, clone the repository:
+> ```bash
+> git clone https://github.com/ADITYA-kus/codemap_ai.git
+> cd codemap_ai
+> pip install -e .
+> ```
 
 ---
 
@@ -161,8 +164,10 @@ echo "YOUR_TOKEN" | codemap analyze --github https://github.com/owner/repo --tok
 
 ## Directory Structure
 
+This is the source code structure for developers. **If you installed via pip, these files are automatically installed in your Python environment.**
+
 ```
-codemap_ai_clean/
+codemap_ai/  (source code)
 ├── README.md              # This file
 ├── cli.py                 # Command-line interface
 ├── security_utils.py      # Security & secret redaction

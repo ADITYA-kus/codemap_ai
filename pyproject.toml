@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codemap-ai"
+name = "codemap-python"
 version = "0.1.0"
 description = "Local Python code analysis tool - understand architecture, dependencies, and call graphs"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-  {name = "ADITYA", email = "your-email@example.com"}
+  {name = "ADITYA", email = "aditykushwaha69@gmail.com"}
 ]
 keywords = [
   "code-analysis",
@@ -31,7 +31,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Software Development :: Libraries :: Python Modules",
-  "Topic :: System :: Analysis",
+  "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
   "fastapi>=0.110",
