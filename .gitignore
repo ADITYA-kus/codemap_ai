@@ -5,6 +5,14 @@
 analysis/output/
 analysis/outputs/
 
+# Test & temporary directories (no nested repos!)
+test_*/
+*_test/
+codemap_test/
+*.test/
+tmp/
+temp/
+
 # Python
 __pycache__/
 *.pyc
