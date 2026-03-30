@@ -11,14 +11,74 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+*.egg/
+dist/
+build/
+.tox/
+.coverage
+htmlcov/
+.pytest_cache/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Env
+# IDE and Editors
+.vscode/
+.vscode-test/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/settings.json
+.vscode/extensions.json
+
+# Environment & Secrets
 .env
 .env.*
+.env.local
+.env.*.local
+*.key
+*.pem
+*.pub
+secrets/
+credentials/
 
+# OS X
+.AppleDouble
+.LSOverwrite
+*.DS_Store
+._*
 
-.vscode-test/
+# Windows
+*.lnk
+$RECYCLE.BIN/
+
+# IDE cache
+.idea/workspace.xml
+*.iml
+.gradle/
+.classpath
+.project
+.settings/
+
+# Test
+.coverage
+.pytest_cache/
+htmlcov/
+test-results/
+coverage.xml
+
+# Build
+dist/
+build/
+*.egg-info/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node (if present for any web components)
+node_modules/
+npm-debug.log
+yarn-error.log

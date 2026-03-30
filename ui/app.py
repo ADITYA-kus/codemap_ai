@@ -42,38 +42,11 @@ GLOBAL_CACHE_DIR = os.path.join(PROJECT_ROOT, ".codemap_cache")
 
 MISSING_CACHE_MESSAGE = "Not analyzed yet. Run: python cli.py api analyze --path <repo>"
 
-_AI_SETTINGS_MEMORY: Dict[str, Any] = {
-    "provider": "none",
-    "model": "",
-    "api_key": "",
-    "configured": False,
-    "saved_at": "",
-}
 _SENSITIVE_FIELD_RE = re.compile(r"(?i)(api[_-]?key|token|authorization|bearer|basic|secret|password)")
 
 _SESSION_LOCK = RLock()
 _SESSION_WORKSPACE: Dict[str, Any] = {"active_repo_hash": "", "repos": []}
 _SESSION_WORKSPACE_READY = False
-
-
-def _ai_settings_path() -> str:
-    return os.path.join(GLOBAL_CACHE_DIR, "_local", "ai_settings.json")
-
-
-def _load_ai_settings_file() -> Dict[str, Any]:
-    return {}
-
-
-def _save_ai_settings_file(data: Dict[str, Any]) -> None:
-    return None
-
-
-def _effective_ai_settings() -> Dict[str, Any]:
-    return {"provider": "none", "api_key": "", "model": "", "configured": False}
-
-
-def _public_ai_settings() -> Dict[str, Any]:
-    return {"provider": "none", "model": "", "configured": False}
 
 
 app = FastAPI(title="CodeMap UI")

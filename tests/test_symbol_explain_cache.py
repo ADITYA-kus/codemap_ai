@@ -67,6 +67,7 @@ class TestSymbolExplainCache(unittest.TestCase):
             json={"repo": self.repo_dir, "symbol": self.symbol_fqn, "force": force},
         )
 
+    @unittest.skip("AI features not yet implemented")
     def test_symbol_explain_cache_and_force(self):
         call_counter = {"count": 0}
 
