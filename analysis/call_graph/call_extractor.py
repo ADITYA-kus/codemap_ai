@@ -1,6 +1,7 @@
 # AST Call detection
 
 import ast
+from analysis.utils.bom_handler import remove_bom
 
 class FunctionCallVisitor(ast.NodeVisitor):
     def __init__(self, file_path):
@@ -83,7 +84,11 @@ class FunctionCallVisitor(ast.NodeVisitor):
 
 def extract_function_calls(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
-        tree = ast.parse(f.read())
+        source = f.read()
+    
+    # Remove BOM if present
+    source = remove_bom(source)
+    tree = ast.parse(source)
 
     visitor = FunctionCallVisitor(file_path)
     visitor.visit(tree)

@@ -12,6 +12,7 @@ from analysis.call_graph.cross_file_resolver import CrossFileResolver
 from analysis.call_graph.call_extractor import extract_function_calls
 from analysis.core.import_extractor import extract_imports
 from analysis.graph.callgraph_index import build_caller_fqn
+from analysis.utils.bom_handler import remove_bom
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -29,8 +30,12 @@ def collect_python_files(root_dir: str) -> List[str]:
 
 
 def parse_ast(file_path: str):
+    """Parse a Python file, automatically handling UTF-8 BOM."""
     with open(file_path, "r", encoding="utf-8") as f:
-        return ast.parse(f.read())
+        source = f.read()
+    # Remove BOM if present
+    source = remove_bom(source)
+    return ast.parse(source)
 
 
 def file_to_module(file_path: str, repo_root: str) -> str:

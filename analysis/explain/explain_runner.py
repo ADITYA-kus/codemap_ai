@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 import ast
 import json
 import os
+from analysis.utils.bom_handler import remove_bom
 
 from analysis.indexing.symbol_index import SymbolIndex, SymbolInfo
 from analysis.graph.callgraph_index import CallGraphIndex, CallSite
@@ -27,8 +28,12 @@ def collect_python_files(root_dir: str):
 
 
 def parse_ast(file_path: str) -> ast.AST:
+    """Parse a Python file, automatically handling UTF-8 BOM."""
     with open(file_path, "r", encoding="utf-8") as f:
-        return ast.parse(f.read())
+        source = f.read()
+    # Remove BOM if present
+    source = remove_bom(source)
+    return ast.parse(source)
 
 
 def file_to_module(file_path: str, repo_root: str) -> str:
