@@ -5,6 +5,9 @@
   const repoSelectEl = document.getElementById("repo-select");
   const addRepoBtnEl = document.getElementById("add-repo-btn");
   const aiSettingsBtnEl = document.getElementById("ai-settings-btn");
+  const themeToggleBtnEl = document.getElementById("theme-toggle-btn");
+  const themeWhiteOptionEl = document.getElementById("theme-white");
+  const themeDarkOptionEl = document.getElementById("theme-dark");
   const repoListModePillEl = document.getElementById("repo-list-mode-pill");
   const treeStatusEl = document.getElementById("tree-status");
   const treeEl = document.getElementById("tree");
@@ -2014,6 +2017,43 @@
   }
 
   function bindAiSettingsControls() {
+    // Theme toggle handlers
+    const setTheme = (themeName) => {
+      localStorage.setItem("codemap-theme", themeName);
+      if (themeName === "dark") {
+        document.body.classList.add("dark-theme");
+        if (themeToggleBtnEl) themeToggleBtnEl.textContent = "☀️ Light";
+        if (themeDarkOptionEl) themeDarkOptionEl.classList.add("active");
+        if (themeWhiteOptionEl) themeWhiteOptionEl.classList.remove("active");
+      } else {
+        document.body.classList.remove("dark-theme");
+        if (themeToggleBtnEl) themeToggleBtnEl.textContent = "🌙 Dark";
+        if (themeWhiteOptionEl) themeWhiteOptionEl.classList.add("active");
+        if (themeDarkOptionEl) themeDarkOptionEl.classList.remove("active");
+      }
+    };
+
+    // Initialize theme from localStorage
+    const savedTheme = localStorage.getItem("codemap-theme") || "light";
+    setTheme(savedTheme);
+
+    // Theme toggle button (top bar)
+    if (themeToggleBtnEl) {
+      themeToggleBtnEl.addEventListener("click", () => {
+        const isDark = document.body.classList.contains("dark-theme");
+        setTheme(isDark ? "light" : "dark");
+      });
+    }
+
+    // Theme option buttons (settings modal)
+    if (themeWhiteOptionEl) {
+      themeWhiteOptionEl.addEventListener("click", () => setTheme("light"));
+    }
+    if (themeDarkOptionEl) {
+      themeDarkOptionEl.addEventListener("click", () => setTheme("dark"));
+    }
+
+    // Original AI settings handlers
     if (aiSettingsBtnEl) {
       aiSettingsBtnEl.addEventListener("click", async () => {
         await openAiSettingsModal();

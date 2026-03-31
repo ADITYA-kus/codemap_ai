@@ -9,6 +9,17 @@
   --active-border: #4f84ff;
 }
 
+body.dark-theme {
+  --bg: #1a1a1a;
+  --panel: #252525;
+  --line: #404040;
+  --text: #e5e5e5;
+  --muted: #a0a0a0;
+  --accent: #4fa3ff;
+  --active-bg: #2a3a4a;
+  --active-border: #5fa3ff;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1198,6 +1209,91 @@ body.modal-open {
 .divider {
   border-top: 1px solid var(--line);
   margin: 10px 0;
+}
+
+.theme-selector {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.theme-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 200ms ease;
+  font-size: 12px;
+}
+
+.theme-option:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(11, 94, 215, 0.1);
+}
+
+.theme-option.active {
+  border-color: var(--accent);
+  background: var(--active-bg);
+  color: #0f3f9c;
+  font-weight: 600;
+}
+
+body.dark-theme .theme-option.active {
+  background: var(--active-bg);
+}
+
+.theme-icon {
+  font-size: 18px;
+}
+
+.theme-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Dark theme specific styles */
+body.dark-theme .topbar {
+  background: #2a2a2a;
+}
+
+body.dark-theme .card,
+body.dark-theme .repo-row,
+body.dark-theme .confirm-card,
+body.dark-theme .modal-form input,
+body.dark-theme .modal-form select,
+body.dark-theme .repo-select,
+body.dark-theme .repo-btn,
+body.dark-theme .tab-btn,
+body.dark-theme .graph-controls select,
+body.dark-theme .graph-controls input[type="text"],
+body.dark-theme .search-results,
+body.dark-theme .graph-node,
+body.dark-theme .kpi-card,
+body.dark-theme .risk-file-row,
+body.dark-theme .risk-target,
+body.dark-theme .impact-file-row {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+body.dark-theme #symbol-search-input {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+body.dark-theme .toast {
+  background: #2a2a2a;
+  color: #e5e5e5;
 }
 
 @media (max-width: 1000px) {
