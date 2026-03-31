@@ -35,6 +35,23 @@ from ui.utils.registry_manager import (
 from security_utils import redact_payload, redact_secrets
 
 
+# Custom cache class that doesn't cache (to avoid TypeError with unhashable Request objects)
+class NoCache:
+    """A cache implementation that doesn't cache anything.
+    
+    This prevents Jinja2 from trying to cache templates with unhashable objects
+    like the Starlette Request in the context.
+    """
+    def get(self, key: Any, default: Any = None) -> Any:
+        return default
+    
+    def set(self, key: Any, value: Any, timeout: Any = None) -> None:
+        pass
+    
+    def clear(self) -> None:
+        pass
+
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 ANALYSIS_ROOT = os.path.join(PROJECT_ROOT, "analysis")
 DEFAULT_REPO = os.getenv("CODEMAP_UI_REPO", "testing_repo")
@@ -50,7 +67,11 @@ _SESSION_WORKSPACE_READY = False
 
 
 app = FastAPI(title="CodeMap UI")
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+templates = Jinja2Templates(directory=templates_dir)
+# Disable Jinja2 template caching to prevent TypeError with unhashable Request objects
+# This avoids issues when Jinja2 tries to cache templates containing the Request context
+templates.env.cache = NoCache()
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 SEARCH_INDEX_CACHE: Dict[str, List[Dict[str, Any]]] = {}
 GRAPH_INDEX_CACHE: Dict[str, Dict[str, Any]] = {}
