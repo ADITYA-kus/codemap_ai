@@ -36,20 +36,24 @@ from security_utils import redact_payload, redact_secrets
 
 
 # Custom cache class that doesn't cache (to avoid TypeError with unhashable Request objects)
-class NoCache:
-    """A cache implementation that doesn't cache anything.
+class NoCache(dict):
+    """A dict-like cache implementation that doesn't actually cache anything.
     
     This prevents Jinja2 from trying to cache templates with unhashable objects
-    like the Starlette Request in the context.
+    like the Starlette Request in the context. Inherits from dict to satisfy
+    Jinja2's duck-typing requirements while not actually storing anything.
     """
+    def __setitem__(self, key: Any, value: Any) -> None:
+        """Silently ignore all cache assignments."""
+        pass
+    
+    def __getitem__(self, key: Any) -> Any:
+        """Always return KeyError to indicate cache miss."""
+        raise KeyError(key)
+    
     def get(self, key: Any, default: Any = None) -> Any:
+        """Always return the default value (cache miss)."""
         return default
-    
-    def set(self, key: Any, value: Any, timeout: Any = None) -> None:
-        pass
-    
-    def clear(self) -> None:
-        pass
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
