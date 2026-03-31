@@ -2021,6 +2021,7 @@
     const setTheme = (themeName) => {
       localStorage.setItem("codemap-theme", themeName);
       if (themeName === "dark") {
+        document.documentElement.classList.add("dark-theme");
         document.body.classList.add("dark-theme");
         if (themeToggleBtnEl) themeToggleBtnEl.textContent = "☀️ Light";
         if (themeDarkOptionEl) {
@@ -2030,6 +2031,7 @@
           themeWhiteOptionEl.classList.remove("active");
         }
       } else {
+        document.documentElement.classList.remove("dark-theme");
         document.body.classList.remove("dark-theme");
         if (themeToggleBtnEl) themeToggleBtnEl.textContent = "🌙 Dark";
         if (themeWhiteOptionEl) {
@@ -2048,7 +2050,7 @@
     // Theme toggle button (top bar)
     if (themeToggleBtnEl) {
       themeToggleBtnEl.addEventListener("click", () => {
-        const isDark = document.body.classList.contains("dark-theme");
+        const isDark = document.documentElement.classList.contains("dark-theme");
         setTheme(isDark ? "light" : "dark");
       });
     }

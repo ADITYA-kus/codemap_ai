@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CodeMap UI</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <script>
+    // Apply theme IMMEDIATELY on page load, before rendering
+    (function() {
+      try {
+        const theme = localStorage.getItem("codemap-theme") || "dark";
+        if (theme === "dark") {
+          document.documentElement.classList.add("dark-theme");
+        }
+      } catch (e) {
+        // fallback: use dark as default
+        document.documentElement.classList.add("dark-theme");
+      }
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">

@@ -9,6 +9,7 @@
   --active-border: #4f84ff;
 }
 
+html.dark-theme,
 body.dark-theme {
   --bg: #1a1a1a;
   --panel: #252525;
@@ -1271,10 +1272,27 @@ body.dark-theme .theme-option.active {
 }
 
 /* Dark theme specific styles */
+html.dark-theme .topbar,
 body.dark-theme .topbar {
   background: #2a2a2a;
 }
 
+html.dark-theme .card,
+html.dark-theme .repo-row,
+html.dark-theme .confirm-card,
+html.dark-theme .modal-form input,
+html.dark-theme .modal-form select,
+html.dark-theme .repo-select,
+html.dark-theme .repo-btn,
+html.dark-theme .tab-btn,
+html.dark-theme .graph-controls select,
+html.dark-theme .graph-controls input[type="text"],
+html.dark-theme .search-results,
+html.dark-theme .graph-node,
+html.dark-theme .kpi-card,
+html.dark-theme .risk-file-row,
+html.dark-theme .risk-target,
+html.dark-theme .impact-file-row,
 body.dark-theme .card,
 body.dark-theme .repo-row,
 body.dark-theme .confirm-card,
@@ -1296,12 +1314,14 @@ body.dark-theme .impact-file-row {
   border-color: var(--line);
 }
 
+html.dark-theme #symbol-search-input,
 body.dark-theme #symbol-search-input {
   background: var(--panel);
   color: var(--text);
   border-color: var(--line);
 }
 
+html.dark-theme .toast,
 body.dark-theme .toast {
   background: #2a2a2a;
   color: #e5e5e5;
