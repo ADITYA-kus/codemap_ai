@@ -2023,18 +2023,26 @@
       if (themeName === "dark") {
         document.body.classList.add("dark-theme");
         if (themeToggleBtnEl) themeToggleBtnEl.textContent = "☀️ Light";
-        if (themeDarkOptionEl) themeDarkOptionEl.classList.add("active");
-        if (themeWhiteOptionEl) themeWhiteOptionEl.classList.remove("active");
+        if (themeDarkOptionEl) {
+          themeDarkOptionEl.classList.add("active");
+        }
+        if (themeWhiteOptionEl) {
+          themeWhiteOptionEl.classList.remove("active");
+        }
       } else {
         document.body.classList.remove("dark-theme");
         if (themeToggleBtnEl) themeToggleBtnEl.textContent = "🌙 Dark";
-        if (themeWhiteOptionEl) themeWhiteOptionEl.classList.add("active");
-        if (themeDarkOptionEl) themeDarkOptionEl.classList.remove("active");
+        if (themeWhiteOptionEl) {
+          themeWhiteOptionEl.classList.add("active");
+        }
+        if (themeDarkOptionEl) {
+          themeDarkOptionEl.classList.remove("active");
+        }
       }
     };
 
-    // Initialize theme from localStorage
-    const savedTheme = localStorage.getItem("codemap-theme") || "light";
+    // Initialize theme from localStorage (default is DARK)
+    const savedTheme = localStorage.getItem("codemap-theme") || "dark";
     setTheme(savedTheme);
 
     // Theme toggle button (top bar)

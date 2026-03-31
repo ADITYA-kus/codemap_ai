@@ -1215,6 +1215,10 @@ body.modal-open {
   display: flex;
   gap: 10px;
   margin-bottom: 10px;
+  padding: 8px;
+  background: var(--panel);
+  border-radius: 8px;
+  border: 1px solid var(--line);
 }
 
 .theme-option {
@@ -1223,7 +1227,7 @@ body.modal-open {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 10px;
+  padding: 12px;
   border: 2px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -1231,11 +1235,13 @@ body.modal-open {
   cursor: pointer;
   transition: all 200ms ease;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .theme-option:hover {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(11, 94, 215, 0.1);
+  box-shadow: 0 0 0 3px rgba(79, 132, 255, 0.15);
+  transform: translateY(-1px);
 }
 
 .theme-option.active {
@@ -1243,20 +1249,25 @@ body.modal-open {
   background: var(--active-bg);
   color: #0f3f9c;
   font-weight: 600;
+  box-shadow: 0 0 0 3px rgba(79, 132, 255, 0.2);
 }
 
 body.dark-theme .theme-option.active {
-  background: var(--active-bg);
+  background: #3a4a5f;
+  color: #4fa3ff;
+  border-color: #4fa3ff;
 }
 
 .theme-icon {
-  font-size: 18px;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .theme-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  font-weight: 600;
 }
 
 /* Dark theme specific styles */
