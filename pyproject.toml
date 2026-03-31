@@ -36,8 +36,9 @@ classifiers = [
 dependencies = [
   "fastapi>=0.110",
   "uvicorn>=0.23",
-  "jinja2>=3.1",
+  "jinja2>=3.1.4",
   "requests>=2.31",
+  "starlette==0.40.0",
 ]
 
 [project.urls]
