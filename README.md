@@ -131,21 +131,34 @@ codemap open --port 8000
 
 ### Cache Management
 ```bash
-# List all analyzed repositories
+# 📋 List all analyzed repositories and their cache info
 codemap cache list
 
-# Show cache details for a repository
-codemap cache info <repo_hash>
+# 📊 Show detailed cache information for a specific repository
+codemap cache info --path <repo_directory>
 
-# Clear a specific repository's cache
-codemap cache clear <repo_hash>
+# ⏱️ Set cache retention policy (automatically clean old caches)
+codemap cache retention --path <repo_directory> --days 30 --yes
 
-# Show cache retention policy
-codemap cache retention <repo_hash>
+# 🧹 Preview what would be cleaned (safe, no deletion)
+codemap cache sweep --dry-run
 
-# Sweep expired caches (auto-cleanup)
-codemap cache sweep
+# 🧹 Actually clean up expired caches (requires --yes confirmation)
+codemap cache sweep --yes
+
+# 🗑️ Clear cache for a specific repository (preview first)
+codemap cache clear --path <repo_directory> --dry-run
+
+# 🗑️ Actually delete a repository's cache (requires --yes confirmation)
+codemap cache clear --path <repo_directory> --yes
 ```
+
+**Cache Management Tips:**
+- ✅ Always use `--dry-run` first to preview changes
+- ✅ Add `--yes` flag to skip confirmation (useful in scripts)
+- ✅ Default retention is 14 days; adjust with `--days <number>`
+- ✅ Cache is stored in: `~/.codemap_cache/` (varies by OS)
+- ✅ Use `cache list` to see all cached repositories and their sizes
 
 **Get GitHub Token (for private repos):**
 1. Go to https://github.com/settings/tokens
