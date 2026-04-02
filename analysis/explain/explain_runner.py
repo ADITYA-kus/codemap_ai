@@ -5,10 +5,8 @@ from __future__ import annotations
 
 from typing import Optional, Dict, Any
 
-import ast
 import json
 import os
-from analysis.utils.bom_handler import remove_bom
 
 from analysis.indexing.symbol_index import SymbolIndex, SymbolInfo
 from analysis.graph.callgraph_index import CallGraphIndex, CallSite
@@ -27,13 +25,10 @@ def collect_python_files(root_dir: str):
     return py_files
 
 
-def parse_ast(file_path: str) -> ast.AST:
-    """Parse a Python file, automatically handling UTF-8 BOM."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        source = f.read()
-    # Remove BOM if present
-    source = remove_bom(source)
-    return ast.parse(source)
+def parse_ast(file_path: str):
+    """Parse a Python file with automatic encoding and BOM handling."""
+    from analysis.utils.bom_handler import read_and_parse_python_file
+    return read_and_parse_python_file(file_path)
 
 
 def file_to_module(file_path: str, repo_root: str) -> str:

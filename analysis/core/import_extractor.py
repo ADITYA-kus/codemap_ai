@@ -2,18 +2,14 @@
 # analysis/import_extractor.py
 
 import ast
-from analysis.utils.bom_handler import remove_bom
+from analysis.utils.bom_handler import read_source_file, parse_source_to_ast
 
 
 def extract_imports(file_path):
-    """Extract imports from a Python file, handling UTF-8 BOM automatically."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        source = f.read()
-
-    # Remove BOM if present
-    source = remove_bom(source)
+    """Extract imports from a Python file with automatic encoding and BOM handling."""
+    source = read_source_file(file_path)
+    tree = parse_source_to_ast(source, file_path=file_path)
     
-    tree = ast.parse(source)
     imports = []
 
     for node in ast.walk(tree):

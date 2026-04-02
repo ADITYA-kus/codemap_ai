@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Optional, Dict, Any, List
 
 import os
-import ast
 import json
 from analysis.indexing.symbol_index import SymbolIndex
 from analysis.indexing.import_resolver import ImportResolver
@@ -12,7 +11,6 @@ from analysis.call_graph.cross_file_resolver import CrossFileResolver
 from analysis.call_graph.call_extractor import extract_function_calls
 from analysis.core.import_extractor import extract_imports
 from analysis.graph.callgraph_index import build_caller_fqn
-from analysis.utils.bom_handler import remove_bom
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -30,12 +28,9 @@ def collect_python_files(root_dir: str) -> List[str]:
 
 
 def parse_ast(file_path: str):
-    """Parse a Python file, automatically handling UTF-8 BOM."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        source = f.read()
-    # Remove BOM if present
-    source = remove_bom(source)
-    return ast.parse(source)
+    """Parse a Python file, automatically handling encoding and UTF-8 BOM."""
+    from analysis.utils.bom_handler import read_and_parse_python_file
+    return read_and_parse_python_file(file_path)
 
 
 def file_to_module(file_path: str, repo_root: str) -> str:

@@ -98,6 +98,15 @@
   let graphDataCache = new Map();
   let impactDataCache = new Map();
   let architectureCache = null;
+  
+  // Track which tabs have been loaded (for lazy loading optimization)
+  let tabsLoaded = {
+    details: true,    // Details tab loads on symbol selection
+    graph: false,     // Lazy load when clicked
+    impact: false,    // Lazy load when clicked
+    architecture: false  // Lazy load when clicked
+  };
+  
   let repoSummary = null;
   let repoSummaryUpdatedAt = "";
   let repoSummaryStatus = "idle"; // idle|loading|ready|missing|error
@@ -523,25 +532,60 @@
     const isImpact = activeTab === "impact";
     const isGraph = activeTab === "graph";
     const isArchitecture = activeTab === "architecture";
+    
+    // Update tab button states
     if (tabDetailsEl) tabDetailsEl.classList.toggle("active", activeTab === "details");
     if (tabImpactEl) tabImpactEl.classList.toggle("active", isImpact);
     if (tabGraphEl) tabGraphEl.classList.toggle("active", isGraph);
     if (tabArchitectureEl) tabArchitectureEl.classList.toggle("active", isArchitecture);
+    
+    // Show/hide tab content
     if (symbolViewEl) symbolViewEl.classList.toggle("hidden", activeTab !== "details");
     if (impactViewEl) impactViewEl.classList.toggle("hidden", !isImpact);
     if (graphViewEl) graphViewEl.classList.toggle("hidden", !isGraph);
     if (architectureViewEl) architectureViewEl.classList.toggle("hidden", !isArchitecture);
     if (graphControlsEl) graphControlsEl.classList.toggle("hidden", !isGraph);
     if (impactControlsEl) impactControlsEl.classList.toggle("hidden", !isImpact);
-    if (isGraph) {
+    
+    // Lazy loading: Only load data if not already loaded
+    // This prevents repeated API calls and speed up tab switching
+    if (isGraph && !tabsLoaded.graph) {
+      showLoadingIndicator(graphViewEl, "Loading call graph...");
       loadGraph();
+      tabsLoaded.graph = true;
+    } else if (isGraph && tabsLoaded.graph) {
+      // Already loaded, just make sure content is visible
+      if (graphViewEl) graphViewEl.classList.remove("hidden");
     }
-    if (isImpact) {
+    
+    if (isImpact && !tabsLoaded.impact) {
+      showLoadingIndicator(impactViewEl, "Loading impact analysis...");
       loadImpact();
+      tabsLoaded.impact = true;
+    } else if (isImpact && tabsLoaded.impact) {
+      if (impactViewEl) impactViewEl.classList.remove("hidden");
     }
-    if (isArchitecture) {
+    
+    if (isArchitecture && !tabsLoaded.architecture) {
+      showLoadingIndicator(architectureViewEl, "Loading architecture insights...");
       loadArchitecture();
+      tabsLoaded.architecture = true;
+    } else if (isArchitecture && tabsLoaded.architecture) {
+      if (architectureViewEl) architectureViewEl.classList.remove("hidden");
     }
+  }
+  
+  // Show loading indicator in a view element
+  function showLoadingIndicator(el, message) {
+    if (!el) return;
+    el.classList.remove("muted", "hidden");
+    el.innerHTML = `<div class="card" style="padding: 20px; text-align: center;">
+      <div style="display: inline-block; width: 24px; height: 24px; border: 3px solid #ccc; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px;"></div>
+      <span>${esc(message)}</span>
+    </div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>`;
   }
 
   function shortLabel(fqn) {
@@ -2585,6 +2629,12 @@
     highlightActiveSymbol();
     graphDataCache.clear();
     impactDataCache.clear();
+    
+    // Allow graph and impact tabs to be reloaded for the new symbol
+    // (Keep details: true since we're loading it now)
+    tabsLoaded.graph = false;
+    tabsLoaded.impact = false;
+    
     showSymbolLoading();
     try {
       const symbolPromise = (async () => {
@@ -2716,6 +2766,15 @@
     riskRadarUpdatedAt = "";
     riskRadarStatus = "idle";
     riskRadarError = "";
+    
+    // Reset tab loading state for new repo (enables lazy loading again)
+    tabsLoaded = {
+      details: true,
+      graph: false,
+      impact: false,
+      architecture: false
+    };
+    
     await loadRepoRegistry();
     const okMeta = await loadMeta();
     await loadDataPrivacy();

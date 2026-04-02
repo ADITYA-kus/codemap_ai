@@ -90,3 +90,20 @@ pip-delete-this-directory.txt
 node_modules/
 npm-debug.log
 yarn-error.log
+
+# Personal local-only files
+.venv/
+.cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.ipynb_checkpoints/
+.python-version
+
+# Personal notes / verification scratch files
+ENCODING_FIX_SUMMARY.md
+GITHUB_ISSUE_FIX.md
+PERFORMANCE_OPTIMIZATION_SUMMARY.md
+verify_dashboard.py
+verify_performance_optimizations.py

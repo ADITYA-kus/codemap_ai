@@ -1112,6 +1112,7 @@ def api_analyze(args) -> int:
     from analysis.architecture.dependency_cycles import compute_dependency_cycle_metrics
     from analysis.architecture.risk_radar import compute_risk_radar
     from analysis.utils.repo_fetcher import fetch_public_repo, fetch_public_repo_zip
+    from analysis.utils.progress_spinner import ProgressSpinner
     from analysis.utils.cache_manager import (
         build_manifest,
         collect_fingerprints,
@@ -1282,6 +1283,10 @@ def api_analyze(args) -> int:
     r2 = {}
     metrics = {}
 
+    # Start progress spinner for large repositories
+    spinner = ProgressSpinner("Analyzing repository...")
+    spinner.start()
+
     try:
         if rebuild_required:
             r1 = run_phase4(
@@ -1399,9 +1404,11 @@ def api_analyze(args) -> int:
         )
         touch_last_accessed(repo_hash)
     except Exception as e:
+        spinner.stop()
         print_json({"ok": False, "error": "ANALYZE_FAILED", "message": redact_secrets(str(e))})
         return 1
 
+    spinner.stop()
     print_json({
         "ok": True,
         "source": source,

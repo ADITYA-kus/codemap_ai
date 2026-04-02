@@ -1,13 +1,12 @@
 # AST Parser Module
-import ast
-from analysis.utils.bom_handler import remove_bom
+from analysis.utils.bom_handler import read_and_parse_python_file
 
 
 def parse_python_file(file_path):
-    """Parse a Python file, automatically handling UTF-8 BOM.
+    """Parse a Python file with automatic encoding and BOM handling.
     
     This function:
-    1. Reads the file with UTF-8 encoding
+    1. Reads the file with automatic encoding detection (UTF-8 → Latin-1)
     2. Removes any BOM characters automatically
     3. Parses the cleaned source code
     
@@ -20,12 +19,7 @@ def parse_python_file(file_path):
     Raises:
         SyntaxError: If source code has syntax errors
         FileNotFoundError: If file doesn't exist
+        ValueError: If file encoding cannot be determined
     """
-    with open(file_path, "r", encoding="utf-8") as f:
-        source = f.read()
-
-    # Remove BOM if present (handles files from Windows editors, etc.)
-    source = remove_bom(source)
-    
-    return ast.parse(source)
+    return read_and_parse_python_file(file_path)
 

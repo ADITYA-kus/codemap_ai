@@ -893,7 +893,11 @@ def _push_recent(items: List[str], value: str, limit: int = 20) -> List[str]:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "default_repo": DEFAULT_REPO})
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"request": request, "default_repo": DEFAULT_REPO}
+    )
 
 
 @app.get("/api/workspace")
