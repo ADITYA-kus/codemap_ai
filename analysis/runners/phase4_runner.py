@@ -8,19 +8,19 @@ import json
 from analysis.indexing.symbol_index import SymbolIndex
 from analysis.indexing.import_resolver import ImportResolver
 from analysis.call_graph.cross_file_resolver import CrossFileResolver
-from analysis.call_graph.call_extractor import extract_function_calls
-from analysis.core.import_extractor import extract_imports
+from analysis.call_graph.call_extractor import extract_function_calls_from_tree
+from analysis.core.import_extractor import extract_imports_from_tree
 from analysis.graph.callgraph_index import build_caller_fqn
+from analysis.utils.repo_walk import filter_skipped_dirs
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 
 def collect_python_files(root_dir: str) -> List[str]:
-    ignore_dirs = {".git", "__pycache__", ".codemap_cache", "node_modules", ".venv", "venv"}
     py_files: List[str] = []
     for root, dirs, files in os.walk(root_dir):
-        dirs[:] = [d for d in dirs if d not in ignore_dirs]
+        dirs[:] = filter_skipped_dirs(dirs)
         for file in files:
             if file.endswith(".py") and not file.startswith("__"):
                 py_files.append(os.path.join(root, file))
@@ -78,22 +78,24 @@ def run(repo_dir: Optional[str] = None, output_dir: Optional[str] = None, force_
     python_files = collect_python_files(repo_dir)
     symbol_index = SymbolIndex()
     file_module_map: Dict[str, str] = {}
+    parsed_trees: Dict[str, Any] = {}
 
     for file_path in python_files:
         module_path = file_to_module(file_path, repo_dir)
         file_module_map[file_path] = module_path
         tree = parse_ast(file_path)
+        parsed_trees[file_path] = tree
         symbol_index.index_file(tree, module_path, file_path)
 
     import_resolver = ImportResolver(symbol_index)
     for file_path in python_files:
         module_path = file_module_map[file_path]
-        imports = extract_imports(file_path)
+        imports = extract_imports_from_tree(parsed_trees[file_path], file_path)
         import_resolver.index_module_imports(module_path, imports)
 
     all_calls = []
     for file_path in python_files:
-        all_calls.extend(extract_function_calls(file_path))
+        all_calls.extend(extract_function_calls_from_tree(parsed_trees[file_path], file_path))
 
     cross_resolver = CrossFileResolver(symbol_index, import_resolver)
     resolved_calls = []

@@ -61,7 +61,7 @@ ANALYSIS_ROOT = os.path.join(PROJECT_ROOT, "analysis")
 DEFAULT_REPO = os.getenv("CODEMAP_UI_REPO", "testing_repo")
 GLOBAL_CACHE_DIR = os.path.join(PROJECT_ROOT, ".codemap_cache")
 
-MISSING_CACHE_MESSAGE = "Not analyzed yet. Run: python cli.py api analyze --path <repo>"
+MISSING_CACHE_MESSAGE = "Not analyzed yet. Run: python codemap_app.py api analyze --path <repo>"
 
 _SENSITIVE_FIELD_RE = re.compile(r"(?i)(api[_-]?key|token|authorization|bearer|basic|secret|password)")
 
@@ -372,7 +372,7 @@ def _cli_json_with_input(
     stdin_text: Optional[str] = None,
     extra_env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    cmd = [sys.executable, os.path.join(PROJECT_ROOT, "cli.py"), "api"] + list(args)
+    cmd = [sys.executable, os.path.join(PROJECT_ROOT, "codemap_app.py"), "api"] + list(args)
     env = os.environ.copy()
     if isinstance(extra_env, dict):
         for k, v in extra_env.items():
@@ -426,8 +426,8 @@ def _repo_analyze_command(repo: Dict[str, Any]) -> str:
         repo_url = str(repo.get("repo_url", "") or "").strip()
         ref = str(repo.get("ref", "") or "").strip() or "main"
         mode = str(repo.get("mode", "") or "zip")
-        return f"python cli.py api analyze --github {repo_url} --ref {ref} --mode {mode}"
-    return f"python cli.py api analyze --path {repo.get('path', '<repo>')}"
+        return f"python codemap_app.py api analyze --github {repo_url} --ref {ref} --mode {mode}"
+    return f"python codemap_app.py api analyze --path {repo.get('path', '<repo>')}"
 
 
 def _get_active_repo_entry() -> Optional[Dict[str, str]]:
@@ -1670,7 +1670,7 @@ def api_architecture(repo: Optional[str] = Query(default=None)):
             content={
                 "ok": False,
                 "error": "MISSING_ARCHITECTURE_CACHE",
-                "message": "Run: python cli.py api analyze --path <repo>",
+                "message": "Run: python codemap_app.py api analyze --path <repo>",
                 "missing_files": missing,
             },
         )

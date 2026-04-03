@@ -14,11 +14,13 @@ from analysis.explain.docstring_extractor import extract_docstrings
 from analysis.explain.signature_extractor import extract_signatures
 from analysis.explain.return_analyzer import analyze_returns
 from analysis.explain.summary_generator import generate_symbol_summary
+from analysis.utils.repo_walk import filter_skipped_dirs
 
 
 def collect_python_files(root_dir: str):
     py_files = []
-    for root, _, files in os.walk(root_dir):
+    for root, dirs, files in os.walk(root_dir):
+        dirs[:] = filter_skipped_dirs(dirs)
         for file in files:
             if file.endswith(".py") and not file.startswith("__"):
                 py_files.append(os.path.join(root, file))
@@ -78,7 +80,11 @@ def merge_maps(dst: dict, src: dict):
         dst[k].update(src.get(k, {}))
 
 
-def run(repo_dir: Optional[str] = None, output_dir: Optional[str] = None) -> Dict[str, Any]:
+def run(
+    repo_dir: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    symbol_snapshot: Optional[list] = None,
+) -> Dict[str, Any]:
     """
     Callable explain pipeline (Phase-5/6), suitable for CLI/VS Code.
 
@@ -116,6 +122,10 @@ def run(repo_dir: Optional[str] = None, output_dir: Optional[str] = None) -> Dic
 
     # 3) Build symbol index + extractors across repo
     symbol_index = SymbolIndex()
+    loaded_snapshot = False
+    if isinstance(symbol_snapshot, list) and symbol_snapshot:
+        symbol_index.load_snapshot(symbol_snapshot)
+        loaded_snapshot = True
 
     repo_docstrings = {"module": None, "classes": {}, "functions": {}, "methods": {}}
     repo_signatures = {"functions": {}, "methods": {}}
@@ -123,11 +133,9 @@ def run(repo_dir: Optional[str] = None, output_dir: Optional[str] = None) -> Dic
 
     for file_path in python_files:
         tree = parse_ast(file_path)
-        module_path = file_to_module(file_path, repo_dir)
-
-
-        # index symbols
-        symbol_index.index_file(tree, module_path, file_path)
+        if not loaded_snapshot:
+            module_path = file_to_module(file_path, repo_dir)
+            symbol_index.index_file(tree, module_path, file_path)
 
         # extract per-file and merge
         merge_maps(repo_docstrings, extract_docstrings(tree))

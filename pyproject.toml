@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codemap-python"
-version = "0.1.4"
+version = "0.1.5"
 description = "Local Python code analysis tool - understand architecture, dependencies, and call graphs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,7 +51,7 @@ codemap = "codemap_cli:main"
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["cli", "codemap_cli", "security_utils"]
+py-modules = ["codemap_app", "codemap_cli", "security_utils"]
 
 [tool.setuptools.packages.find]
 include = ["analysis*", "ui*"]

@@ -14,7 +14,10 @@ from analysis.graph.callgraph_index import CallGraphIndex
 def _first_line(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
-    line = text.strip().splitlines()[0].strip()
+    stripped = text.strip()
+    if not stripped:
+        return None
+    line = stripped.splitlines()[0].strip()
     return line or None
 
 

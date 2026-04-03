@@ -21,7 +21,7 @@ class TestCliTokenSecurity(unittest.TestCase):
         token = "ghp_TESTTOKEN1234567890abcDEF"
         cmd = [
             sys.executable,
-            os.path.join(PROJECT_ROOT, "cli.py"),
+            os.path.join(PROJECT_ROOT, "codemap_app.py"),
             "api",
             "analyze",
             "--github",

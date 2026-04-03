@@ -9,11 +9,11 @@ from datetime import datetime, timezone
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 
+from analysis.utils.repo_walk import filter_skipped_dirs
 from security_utils import redact_secrets
 
 _LOCK = RLock()
 _SENSITIVE_KEYS = ("api_key", "token", "authorization", "bearer", "basic", "secret", "password")
-_SKIP_DIRS = {".git", "__pycache__", ".codemap_cache", ".venv", "venv", "node_modules"}
 
 
 def _project_root() -> str:
@@ -199,7 +199,7 @@ def collect_fingerprints(repo_dir: str) -> Dict[str, Dict[str, int]]:
     if not os.path.isdir(repo_root):
         return out
     for root, dirs, files in os.walk(repo_root):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        dirs[:] = filter_skipped_dirs(dirs)
         for name in files:
             if not name.endswith(".py"):
                 continue
@@ -250,14 +250,19 @@ def save_manifest(repo_dir: str, manifest: Dict[str, Any], base_dir: Optional[st
         _atomic_json_write(_manifest_path(repo_dir, base_dir), _scrub_payload(payload))
 
 
-def should_rebuild(repo_dir: str, analysis_version: str = "2.2", base_dir: Optional[str] = None) -> bool:
+def should_rebuild(
+    repo_dir: str,
+    analysis_version: str = "2.2",
+    base_dir: Optional[str] = None,
+    current_fingerprints: Optional[Dict[str, Any]] = None,
+) -> bool:
     manifest = load_manifest(repo_dir, base_dir=base_dir)
     if not manifest:
         return True
     if str(manifest.get("analysis_version", "") or "") != str(analysis_version or ""):
         return True
     previous = manifest.get("fingerprints", {}) if isinstance(manifest.get("fingerprints"), dict) else {}
-    current = collect_fingerprints(repo_dir)
+    current = current_fingerprints if isinstance(current_fingerprints, dict) else collect_fingerprints(repo_dir)
     delta = diff_fingerprints(previous, current)
     return bool(delta.get("changed_count", 0))
 

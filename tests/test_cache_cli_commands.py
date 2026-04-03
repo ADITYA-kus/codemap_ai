@@ -1,8 +1,8 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 
 
@@ -11,7 +11,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 class TestCacheCliCommands(unittest.TestCase):
     def _run_cli(self, *args):
-        cmd = [sys.executable, os.path.join(PROJECT_ROOT, "cli.py"), "api", *args]
+        cmd = [sys.executable, os.path.join(PROJECT_ROOT, "codemap_app.py"), "api", *args]
         proc = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
         try:
             payload = json.loads((proc.stdout or "").strip() or "{}")
@@ -20,8 +20,9 @@ class TestCacheCliCommands(unittest.TestCase):
         return proc.returncode, payload
 
     def test_cache_commands_schema(self):
-        with tempfile.TemporaryDirectory() as td:
-            repo_dir = os.path.join(td, "repo")
+        repo_dir = os.path.join(PROJECT_ROOT, "tests", "_tmp_cache_cli_repo")
+        shutil.rmtree(repo_dir, ignore_errors=True)
+        try:
             os.makedirs(repo_dir, exist_ok=True)
             with open(os.path.join(repo_dir, "a.py"), "w", encoding="utf-8") as f:
                 f.write("def x():\n    return 1\n")
@@ -29,6 +30,8 @@ class TestCacheCliCommands(unittest.TestCase):
             rc_an, out_an = self._run_cli("analyze", "--path", repo_dir)
             self.assertEqual(rc_an, 0, msg=out_an)
             self.assertTrue(out_an.get("ok"))
+            self.assertIn("timings", out_an)
+            self.assertIn("total", out_an.get("timings", {}))
 
             rc_list, out_list = self._run_cli("cache", "list")
             self.assertEqual(rc_list, 0, msg=out_list)
@@ -58,6 +61,8 @@ class TestCacheCliCommands(unittest.TestCase):
             self.assertTrue(out_clear.get("ok"))
             self.assertIn("deleted", out_clear)
             self.assertIn("freed_bytes_estimate", out_clear)
+        finally:
+            shutil.rmtree(repo_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

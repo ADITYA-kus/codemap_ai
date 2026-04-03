@@ -85,7 +85,10 @@ class FunctionCallVisitor(ast.NodeVisitor):
 def extract_function_calls(file_path):
     source = read_source_file(file_path)
     tree = parse_source_to_ast(source, file_path=file_path)
+    return extract_function_calls_from_tree(tree, file_path)
 
+
+def extract_function_calls_from_tree(tree, file_path):
     visitor = FunctionCallVisitor(file_path)
     visitor.visit(tree)
 

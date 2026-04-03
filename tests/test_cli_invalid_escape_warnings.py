@@ -21,7 +21,7 @@ class TestCliInvalidEscapeWarnings(unittest.TestCase):
                     "    return PATTERNS\n"
                 )
 
-            cmd = [sys.executable, os.path.join(PROJECT_ROOT, "cli.py"), "analyze", "--path", repo_dir]
+            cmd = [sys.executable, os.path.join(PROJECT_ROOT, "codemap_app.py"), "analyze", "--path", repo_dir]
             proc = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
 
             self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)

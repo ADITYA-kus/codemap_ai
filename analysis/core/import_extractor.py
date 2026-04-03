@@ -5,11 +5,8 @@ import ast
 from analysis.utils.bom_handler import read_source_file, parse_source_to_ast
 
 
-def extract_imports(file_path):
-    """Extract imports from a Python file with automatic encoding and BOM handling."""
-    source = read_source_file(file_path)
-    tree = parse_source_to_ast(source, file_path=file_path)
-    
+def extract_imports_from_tree(tree, file_path):
+    """Extract imports from an already-parsed AST tree."""
     imports = []
 
     for node in ast.walk(tree):
@@ -43,3 +40,10 @@ def extract_imports(file_path):
                 })
 
     return imports
+
+
+def extract_imports(file_path):
+    """Extract imports from a Python file with automatic encoding and BOM handling."""
+    source = read_source_file(file_path)
+    tree = parse_source_to_ast(source, file_path=file_path)
+    return extract_imports_from_tree(tree, file_path)

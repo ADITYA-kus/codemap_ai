@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cli import main as _main
+from codemap_app import main as _main
 
 
 def main() -> int:

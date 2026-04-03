@@ -231,13 +231,13 @@
 
   function analyzeCommandForRepo(repo) {
     const r = repo || currentRepoEntry();
-    if (!r) return "python cli.py api analyze --path <repo>";
+    if (!r) return "python codemap_app.py api analyze --path <repo>";
     if (String(r.source || "filesystem") === "github" && r.repo_url) {
       const ref = r.ref || "main";
       const mode = r.mode || "zip";
-      return `python cli.py api analyze --github ${r.repo_url} --ref ${ref} --mode ${mode}`;
+      return `python codemap_app.py api analyze --github ${r.repo_url} --ref ${ref} --mode ${mode}`;
     }
-    return `python cli.py api analyze --path ${r.repo_path || "<repo>"}`;
+    return `python codemap_app.py api analyze --path ${r.repo_path || "<repo>"}`;
   }
 
   function updateAiModeUi() {
@@ -612,7 +612,7 @@
   }
 
   function repoSummarySection() {
-    const cmd = `python cli.py api repo_summary --repo ${repoName || "<repo>"}`;
+    const cmd = `python codemap_app.py api repo_summary --repo ${repoName || "<repo>"}`;
     const controls = `
       <div class="repo-row-actions">
         <button id='repo-summary-view' class='repo-refresh-btn' type='button'>View summary</button>
@@ -730,7 +730,7 @@
   }
 
   function riskRadarSection() {
-    const cmd = `python cli.py api risk_radar --repo ${repoName || "<repo>"}`;
+    const cmd = `python codemap_app.py api risk_radar --repo ${repoName || "<repo>"}`;
     if (riskRadarStatus === "loading") {
       return `<div class="card"><div class="section-title">Risk Radar</div><div class="path">Loading risk radar...</div></div>`;
     }
@@ -913,7 +913,7 @@
         <div class="card arch-missing">
           <div class="section-title">Architecture Insights Unavailable</div>
           <div>${esc((e && (e.message || e.error)) || "Missing architecture cache artifacts.")}</div>
-          <div class="path">Run: python cli.py api analyze --path &lt;repo&gt;</div>
+          <div class="path">Run: python codemap_app.py api analyze --path &lt;repo&gt;</div>
         </div>
       `;
     }
