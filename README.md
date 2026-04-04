@@ -33,16 +33,6 @@ You should see:
 ```
 usage: codemap [-h] {analyze,dashboard,open,cache} ...
 ```
-
-> **For developers:** To modify source code or contribute, clone the repository:
-> ```bash
-> git clone https://github.com/ADITYA-kus/codemap_ai.git
-> cd codemap_ai
-> pip install -e .
-> ```
-
----
-
 ### Step 2️⃣: Analyze Your First Repository
 
 **IMPORTANT:** The `analyze` command REQUIRES the `--path` argument pointing to a directory!
@@ -129,6 +119,11 @@ codemap dashboard --port 8000 --reload
 codemap open --port 8000
 ```
 
+
+
+
+[![Watch Demo](https://img.youtube.com/vi/MG6bgVk-uUU/0.jpg)](https://www.youtube.com/watch?v=MG6bgVk-uUU)
+
 ### Cache Management
 ```bash
 # 📋 List all analyzed repositories and their cache info
@@ -172,33 +167,6 @@ codemap cache clear --path <repo_directory> --yes
 ```bash
 echo "YOUR_TOKEN" | codemap analyze --github https://github.com/owner/repo --token-stdin
 ```
-
----
-
-## Directory Structure
-
-This is the source code structure for developers. **If you installed via pip, these files are automatically installed in your Python environment.**
-
-```
-codemap_ai/  (source code)
-├── README.md              # This file
-├── cli.py                 # Command-line interface
-├── security_utils.py      # Security & secret redaction
-├── pyproject.toml         # Package configuration
-├── analysis/              # Code analysis engine
-│   ├── core/             # AST parsing, imports
-│   ├── call_graph/       # Call graph building
-│   ├── explain/          # Symbol metadata
-│   ├── architecture/     # Dependency analysis
-│   └── graph/            # Graph indexing
-├── ui/                    # Web dashboard
-│   ├── app.py            # FastAPI server
-│   ├── templates/        # HTML templates
-│   └── static/           # CSS, JavaScript
-├── tests/                 # Test suite
-└── demo_repo/            # Example repository
-```
-
 ---
 
 ## Features Explained
