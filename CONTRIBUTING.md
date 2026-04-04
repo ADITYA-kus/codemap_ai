@@ -74,23 +74,8 @@ git push origin feature/your-feature-name
 # Describe what changed and why
 ```
 
-## What Happens on PR
 
-1. **Automatic Checks Run** - All CI jobs start immediately
-2. **Status Visible** - See results in the PR checks section
-3. **Must Pass** - All checks must pass before merging
-4. **Review + Merge** - If checks pass, maintainers review and merge
 
-## Common Issues
-
-### ❌ "Python syntax error"
-
-**Problem:** Your Python file has invalid syntax
-
-**Fix:**
-```bash
-python -m py_compile your_file.py
-```
 
 Check the error output and fix the syntax.
 
@@ -153,18 +138,6 @@ def analyze_repo(path: str) -> dict:
         Dictionary with analysis results
     """
     ...
-```
-
-### Commits
-
-- Use present tense: "Add feature" not "Added feature"
-- Keep commits focused on one change
-- Reference issues: "Fixes #123"
-
-```bash
-git commit -m "Add: Dark theme toggle with localStorage persistence"
-git commit -m "Fix: Theme not loading on page load (#15)"
-git commit -m "Docs: Update installation guide"
 ```
 
 ## Reporting Issues
