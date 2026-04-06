@@ -12,6 +12,9 @@ codemap_test/
 *.test/
 tmp/
 temp/
+tmp_build/
+tmp_dist/
+tmp_test/
 
 # Python
 __pycache__/

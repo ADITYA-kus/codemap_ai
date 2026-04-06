@@ -1414,6 +1414,7 @@ def api_analyze(args) -> int:
             arch_payload = compute_architecture_metrics(
                 callgraph=callgraph,
                 symbol_index=symbol_index,
+                repo_dir=repo_dir,
                 repo_prefix=repo_prefix,
             )
             dep_payload = compute_dependency_cycle_metrics(

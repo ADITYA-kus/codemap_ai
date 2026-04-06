@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from typing import Dict, Any, Optional, Set
+from analysis.graph.entrypoint_detector import detect_entry_points
 
 
 def _kind_for_fqn(fqn: str, repo_prefix: str) -> str:
@@ -52,6 +53,7 @@ def _infer_repo_prefix(nodes: Set[str]) -> str:
 def compute_architecture_metrics(
     callgraph,
     symbol_index,
+    repo_dir: Optional[str] = None,
     repo_prefix: Optional[str] = None,
     top_k: int = 25,
     fanout_threshold: int = 10,
@@ -134,6 +136,8 @@ def compute_architecture_metrics(
             "edges": int(edges_per_file.get(fp, 0)),
         }
 
+    entry_points = detect_entry_points(repo_dir=repo_dir, repo_prefix=prefix) if repo_dir else []
+
     return {
         "ok": True,
         "repo_prefix": prefix,
@@ -142,6 +146,7 @@ def compute_architecture_metrics(
             "dead_symbols": sorted(dead_symbols),
             "orchestrators": sorted(orchestrators),
             "critical_symbols": sorted(critical),
+            "entry_points": entry_points,
             "top_fan_in": top_fan_in,
             "top_fan_out": top_fan_out,
         },

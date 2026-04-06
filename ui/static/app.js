@@ -73,6 +73,11 @@
   const confirmMessageEl = document.getElementById("confirm-message");
   const confirmYesEl = document.getElementById("confirm-yes");
   const confirmNoEl = document.getElementById("confirm-no");
+  const impactPreviewModalEl = document.getElementById("impact-preview-modal");
+  const impactPreviewSubtitleEl = document.getElementById("impact-preview-subtitle");
+  const impactPreviewContentEl = document.getElementById("impact-preview-content");
+  const impactPreviewCloseEl = document.getElementById("impact-preview-close");
+  const impactPreviewOpenDetailsEl = document.getElementById("impact-preview-open-details");
   const aiSettingsModalEl = document.getElementById("ai-settings-modal");
   const aiSettingsKeyEl = null;
   const aiSettingsRememberReposEl = document.getElementById("ai-settings-remember-repos");
@@ -123,6 +128,7 @@
   let repoRegistry = [];
   let rememberRepos = false;
   let autoCleanOnRemove = false;
+  let impactPreviewFqn = "";
 
   function withRepo(path) {
     return new URL(path, window.location.origin).toString();
@@ -166,6 +172,15 @@
       .replace(/[*#`]/g, "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function syncModalBodyState() {
+    const anyOpen = [
+      confirmModalEl,
+      aiSettingsModalEl,
+      impactPreviewModalEl,
+    ].some((el) => el && !el.classList.contains("hidden"));
+    document.body.classList.toggle("modal-open", anyOpen);
   }
 
   function _summaryFromMarkdown(content) {
@@ -415,9 +430,10 @@
     architectureViewEl.classList.add("muted");
     fileViewEl.textContent = message || "Select a file from the tree.";
     symbolViewEl.textContent = "Select a symbol to view summary and usages.";
-    impactViewEl.textContent = "Select a symbol to view impact.";
-    graphViewEl.textContent = "Select a symbol to view graph.";
+    impactViewEl.textContent = "Select a symbol to see what may be affected if you change it.";
+    graphViewEl.textContent = "Select a symbol to see its connection map.";
     architectureViewEl.textContent = "Select a repository to view architecture insights.";
+    closeImpactPreview(false);
     recentSymbols = [];
     recentFiles = [];
     lastSymbol = "";
@@ -527,6 +543,37 @@
     };
   }
 
+  async function prefetchSymbolTabData(fqn) {
+    const anchor = String(fqn || activeSymbolFqn || "").trim();
+    if (!anchor) return;
+
+    try {
+      const impactDepth = Number(impactDepthEl && impactDepthEl.value ? impactDepthEl.value : 2);
+      const impactMaxNodes = Number(impactMaxNodesEl && impactMaxNodesEl.value ? impactMaxNodesEl.value : 200);
+      const impactKey = `${anchor}|${impactDepth}|${impactMaxNodes}`;
+      if (!impactDataCache.has(impactKey)) {
+        fetchJson(`/api/impact?target=${encodeURIComponent(anchor)}&depth=${impactDepth}&max_nodes=${impactMaxNodes}`)
+          .then((data) => impactDataCache.set(impactKey, data))
+          .catch(() => {});
+      }
+    } catch (_e) {
+      // ignore background prefetch failures
+    }
+
+    try {
+      const p = graphParams();
+      if (p.mode !== "symbol") return;
+      const graphKey = `symbol|${anchor}|${p.depth}|${p.hideBuiltins}|${p.hideExternal}`;
+      if (!graphDataCache.has(graphKey)) {
+        fetchJson(`/api/graph?fqn=${encodeURIComponent(anchor)}&depth=${p.depth}&hide_builtins=${p.hideBuiltins ? "true" : "false"}&hide_external=${p.hideExternal ? "true" : "false"}`)
+          .then((data) => graphDataCache.set(graphKey, data))
+          .catch(() => {});
+      }
+    } catch (_e) {
+      // ignore background prefetch failures
+    }
+  }
+
   function setActiveTab(tab) {
     activeTab = tab === "graph" || tab === "architecture" || tab === "impact" ? tab : "details";
     const isImpact = activeTab === "impact";
@@ -589,9 +636,36 @@
   }
 
   function shortLabel(fqn) {
-    const parts = String(fqn || "").split(".");
-    if (parts.length >= 2) return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
-    return parts[parts.length - 1] || fqn;
+    const raw = String(fqn || "").trim();
+    if (!raw) return "";
+    if (raw.startsWith("builtins.")) {
+      const name = raw.slice("builtins.".length);
+      return `Python builtin: ${name}${/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? "()" : ""}`;
+    }
+    if (raw.startsWith("external::")) {
+      return `External package: ${raw.slice("external::".length)}`;
+    }
+    const parts = raw.split(".");
+    const last = parts[parts.length - 1] || raw;
+    const prev = parts[parts.length - 2] || "";
+    if (last === "<module>") {
+      return prev ? `${prev} module` : "Module code";
+    }
+    if (parts.length >= 2) return `${prev}.${last}`;
+    return last;
+  }
+
+  function fullLabel(fqn) {
+    const raw = String(fqn || "").trim();
+    if (!raw) return "";
+    if (raw.startsWith("builtins.")) {
+      const name = raw.slice("builtins.".length);
+      return `Python builtin ${name}${/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? "()" : ""}`;
+    }
+    if (raw.startsWith("external::")) {
+      return `External package ${raw.slice("external::".length)}`;
+    }
+    return raw;
   }
 
   function basename(path) {
@@ -611,47 +685,171 @@
     }).join("");
   }
 
+  function renderArchitecturePriorityList(items, emptyText) {
+    if (!items || !items.length) return `<div class="muted">${esc(emptyText)}</div>`;
+    return items.slice(0, 4).map((item) => {
+      const reason = Array.isArray(item.reasons) && item.reasons.length ? item.reasons[0] : "High architectural importance.";
+      const location = item.location || {};
+      const fileLabel = basename(location.file || "");
+      return `
+        <button class="arch-row architecture-focus-row" data-fqn="${esc(item.fqn)}">
+          <div class="impact-node-header">
+            <span class="arch-name">${esc(shortLabel(item.fqn))}</span>
+            <span class="${riskPillClass(item.risk)}">${esc(item.risk || "low")}</span>
+          </div>
+          <div class="impact-node-copy">${esc(reason)}</div>
+          <div class="impact-meta-row">
+            <span class="impact-meta-pill">Risk score: ${esc(String(item.score || 0))}</span>
+            <span class="impact-meta-pill">Incoming users: ${esc(String(item.fan_in || 0))}</span>
+            <span class="impact-meta-pill">Outgoing calls: ${esc(String(item.fan_out || 0))}</span>
+            ${fileLabel ? `<span class="impact-meta-pill">File: ${esc(fileLabel)}</span>` : ""}
+          </div>
+        </button>
+      `;
+    }).join("");
+  }
+
+  function renderArchitectureFileList(items, emptyText) {
+    if (!items || !items.length) return `<div class="muted">${esc(emptyText)}</div>`;
+    return items.slice(0, 4).map((item) => `
+      <div class="impact-node-static architecture-file-row">
+        <div class="impact-node-header">
+          <span class="arch-name">${esc(relPath(item.file || ""))}</span>
+          <span class="${riskPillClass(item.risk)}">${esc(item.risk || "low")}</span>
+        </div>
+        <div class="impact-node-copy">${esc((Array.isArray(item.reasons) && item.reasons[0]) || "This file has elevated structural coupling.")}</div>
+        <div class="impact-meta-row">
+          <span class="impact-meta-pill">Risk score: ${esc(String(item.score || 0))}</span>
+          <span class="impact-meta-pill">Edges: ${esc(String(item.edges || 0))}</span>
+          <span class="impact-meta-pill">Incoming symbols: ${esc(String(item.incoming_symbols || 0))}</span>
+          <span class="impact-meta-pill">Outgoing symbols: ${esc(String(item.outgoing_symbols || 0))}</span>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  function renderArchitectureCycleList(cycles) {
+    if (!cycles || !cycles.length) {
+      return "<div class='ok-cycle'>No dependency cycles detected.</div>";
+    }
+    return cycles.slice(0, 3).map((cycle) => {
+      const text = cycle.join(" -> ");
+      return `
+        <div class="cycle-row architecture-cycle-row">
+          <div>
+            <div class="arch-name">Circular dependency path</div>
+            <div class="path">${esc(text)}</div>
+          </div>
+          <button class="copy-cycle" data-cycle="${esc(text)}">Copy</button>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function entryPointKindLabel(kind) {
+    const value = String(kind || "").toLowerCase();
+    if (value === "api_route") return "Web route";
+    if (value === "cli_command") return "CLI command";
+    return "Script start";
+  }
+
+  function renderEntryPointList(items) {
+    if (!items || !items.length) {
+      return "<div class='muted'>No clear repo entry points were detected.</div>";
+    }
+    return items.slice(0, 8).map((item) => {
+      const hasFqn = !!String(item.fqn || "").trim();
+      const rowClass = hasFqn ? "arch-row architecture-entry-row" : "impact-node-static architecture-entry-row";
+      const openAttr = hasFqn ? ` data-fqn="${esc(item.fqn)}"` : "";
+      return `
+        <div class="${rowClass}"${openAttr}>
+          <div class="impact-node-header">
+            <span class="arch-name">${esc(item.title || entryPointKindLabel(item.kind))}</span>
+            <span class="impact-distance">${esc(entryPointKindLabel(item.kind))}</span>
+          </div>
+          <div class="impact-node-copy">${esc(item.reason || "This looks like a place where execution can begin.")}</div>
+          <div class="impact-meta-row">
+            <span class="impact-meta-pill">File: ${esc(relPath(item.file || ""))}</span>
+            <span class="impact-meta-pill">Line: ${esc(String(item.line || 1))}</span>
+            ${hasFqn ? `<span class="impact-meta-pill">Open symbol preview</span>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function architectureOverviewSection(repoSummaryPayload, riskPayload, cycleCount, entryPointCount) {
+    const summary = (repoSummaryPayload && repoSummaryPayload.summary) || {};
+    const bullets = Array.isArray(summary.bullets) ? summary.bullets.slice(0, 3) : [];
+    const health = (riskPayload && riskPayload.repo_health) || {};
+    const hotspots = Number(health.hotspot_symbols || 0);
+    const riskyFiles = Number(health.risky_files || 0);
+    const unresolvedRatio = Number(health.unresolved_ratio || 0);
+    const updatedAt = (repoSummaryPayload && (repoSummaryPayload.cached_at || repoSummaryPayload.generated_at)) || repoSummaryUpdatedAt || riskRadarUpdatedAt || "unknown";
+
+    return `
+      <div class="card architecture-hero-card">
+        <div class="section-title">Architecture Overview</div>
+        <div class="arch-one-liner">${esc(summary.one_liner || "High-level architecture summary is not available yet.")}</div>
+        ${bullets.length ? `<div class="architecture-note-stack">${bullets.map((b) => `<div class="architecture-note">${esc(b)}</div>`).join("")}</div>` : ""}
+        <div class="impact-stats-grid architecture-stats-grid">
+          <div class="impact-stat-card">
+            <div class="impact-stat-label">How the repo starts</div>
+            <div class="impact-stat-value">${esc(String(entryPointCount || 0))}</div>
+            <div class="path">${esc(pluralize("entry point", entryPointCount || 0))} detected</div>
+          </div>
+          <div class="impact-stat-card">
+            <div class="impact-stat-label">Hotspots to inspect</div>
+            <div class="impact-stat-value">${esc(String(hotspots))}</div>
+            <div class="path">${esc(pluralize("symbol", hotspots))} flagged as high-signal change points</div>
+          </div>
+          <div class="impact-stat-card">
+            <div class="impact-stat-label">Risky files</div>
+            <div class="impact-stat-value">${esc(String(riskyFiles))}</div>
+            <div class="path">${esc(pluralize("file", riskyFiles))} stand out for high coupling</div>
+          </div>
+          <div class="impact-stat-card">
+            <div class="impact-stat-label">Dependency cycles</div>
+            <div class="impact-stat-value">${esc(String(cycleCount || 0))}</div>
+            <div class="path">${cycleCount ? "Circular dependencies are present." : "No circular dependencies detected."}</div>
+          </div>
+          <div class="impact-stat-card">
+            <div class="impact-stat-label">Unresolved call ratio</div>
+            <div class="impact-stat-value">${esc(`${Math.round(unresolvedRatio * 100)}%`)}</div>
+            <div class="path">Lower is easier to trust when exploring the repo</div>
+          </div>
+        </div>
+        <div class="path">Updated: ${esc(updatedAt)}</div>
+      </div>
+    `;
+  }
+
   function repoSummarySection() {
     const cmd = `python codemap_app.py api repo_summary --repo ${repoName || "<repo>"}`;
     const controls = `
       <div class="repo-row-actions">
-        <button id='repo-summary-view' class='repo-refresh-btn' type='button'>View summary</button>
-        <button id='repo-summary-regen' class='repo-refresh-btn' type='button'>Regenerate summary</button>
+        <button id='repo-summary-regen' class='repo-refresh-btn' type='button'>Refresh overview</button>
       </div>
     `;
     if (repoSummaryStatus === "loading") {
-      return `<div class="card"><div class="section-title">Repo Summary</div>${controls}<div class="path">Loading summary...</div></div>`;
+      return `<div class="card"><div class="section-title">Architecture Overview</div>${controls}<div class="path">Loading summary...</div></div>`;
     }
     if (repoSummaryStatus === "disabled") {
-      return `<div class="card arch-missing"><div class="section-title">Repo Summary</div>${controls}<div>Summary unavailable.</div></div>`;
+      return `<div class="card arch-missing"><div class="section-title">Architecture Overview</div>${controls}<div>Summary unavailable.</div></div>`;
     }
     if (repoSummaryStatus === "missing") {
-      return `<div class="card arch-missing"><div class="section-title">Repo Summary</div>${controls}<div>No cached summary for current analysis. Click Regenerate.</div><div class="path">${esc(cmd)}</div></div>`;
+      return `<div class="card arch-missing"><div class="section-title">Architecture Overview</div>${controls}<div>No summary cached for this repo yet. Click Refresh overview.</div><div class="path">${esc(cmd)}</div></div>`;
     }
     if (repoSummaryStatus === "stale") {
-      return `<div class="card arch-missing"><div class="section-title">Repo Summary</div>${controls}<div><span class="repo-badge expiring">Outdated (repo changed)</span></div><div class="path">No cached summary for current analysis. Click Regenerate.</div></div>`;
+      return `<div class="card arch-missing"><div class="section-title">Architecture Overview</div>${controls}<div><span class="repo-badge expiring">Outdated (repo changed)</span></div><div class="path">Click Refresh overview to rebuild the summary.</div></div>`;
     }
     if (repoSummaryStatus === "error") {
-      return `<div class="card arch-missing"><div class="section-title">Repo Summary</div>${controls}<div>${esc(repoSummaryError || "Failed to load repo summary.")}</div><div class="path">Run analyze, then: ${esc(cmd)}</div></div>`;
+      return `<div class="card arch-missing"><div class="section-title">Architecture Overview</div>${controls}<div>${esc(repoSummaryError || "Failed to load repo summary.")}</div><div class="path">Run analyze, then: ${esc(cmd)}</div></div>`;
     }
     if (repoSummaryStatus !== "ready" || !repoSummary) {
-      return `<div class="card"><div class="section-title">Repo Summary</div>${controls}<div class="path">Summary is idle. View cached or regenerate.</div></div>`;
+      return `<div class="card"><div class="section-title">Architecture Overview</div>${controls}<div class="path">Overview is idle. Click Refresh overview.</div></div>`;
     }
-
-    const payload = repoSummary || {};
-    const summary = payload.summary || {};
-    const bullets = Array.isArray(summary.bullets) ? summary.bullets.slice(0, 7) : [];
-    const notes = Array.isArray(summary.notes) ? summary.notes.slice(0, 5) : [];
-    return `
-      <div class="card">
-        <div class="section-title">Repo Summary</div>
-        ${controls}
-        <div class="arch-one-liner">${esc(summary.one_liner || "")}</div>
-        ${bullets.length ? `<ul class="arch-bullets">${bullets.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>` : "<div class='muted'>No bullets available.</div>"}
-        ${notes.length ? `<div class="section-title">Notes</div><ul class="arch-bullets">${notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
-        <div class="path">source: deterministic | cached: ${esc(String(payload.cached))} | updated: ${esc(payload.cached_at || payload.generated_at || repoSummaryUpdatedAt || "unknown")}</div>
-      </div>
-    `;
+    return "";
   }
 
   async function loadRepoSummary(force, generate) {
@@ -745,54 +943,21 @@
     }
 
     const payload = riskRadar || {};
-    const hotspots = Array.isArray(payload.hotspots) ? payload.hotspots.slice(0, 5) : [];
-    const riskyFiles = Array.isArray(payload.risky_files) ? payload.risky_files.slice(0, 5) : [];
-    const refactors = Array.isArray(payload.refactor_targets) ? payload.refactor_targets.slice(0, 6) : [];
-
-    const hotspotsHtml = hotspots.length
-      ? hotspots.map((h) => `
-        <button class="arch-row risk-hotspot-row" data-fqn="${esc(h.fqn)}">
-          <span class="arch-name">${esc(shortLabel(h.fqn))}</span>
-          <span class="${riskPillClass(h.risk)}">${esc(h.risk)}</span>
-          <span class="path">score:${esc(h.score)} in:${esc(h.fan_in)} out:${esc(h.fan_out)}</span>
-          ${Array.isArray(h.reasons) && h.reasons.length ? `<span class="path">${esc(h.reasons[0])}</span>` : ""}
-        </button>
-      `).join("")
-      : "<div class='muted'>No hotspots detected.</div>";
-
-    const filesHtml = riskyFiles.length
-      ? riskyFiles.map((f) => `
-        <div class="risk-file-row">
-          <span class="arch-name">${esc(basename(f.file || ""))}</span>
-          <span class="${riskPillClass(f.risk)}">${esc(f.risk)}</span>
-          <span class="path">score:${esc(f.score)} edges:${esc(f.edges)}</span>
-        </div>
-      `).join("")
-      : "<div class='muted'>No risky files detected.</div>";
-
-    const refactorHtml = refactors.length
-      ? refactors.map((r) => `
-        <div class="risk-target">
-          <div class="arch-name">${esc(r.title || "")}</div>
-          <div class="path">${esc(r.why || "")}</div>
-          ${(Array.isArray(r.targets) && r.targets.length) ? `<div class="path">targets: ${esc(r.targets.join(", "))}</div>` : ""}
-        </div>
-      `).join("")
-      : "<div class='muted'>No refactor targets suggested.</div>";
+    const hotspots = Array.isArray(payload.hotspots) ? payload.hotspots.slice(0, 4) : [];
+    const riskyFiles = Array.isArray(payload.risky_files) ? payload.risky_files.slice(0, 4) : [];
+    const health = payload.repo_health || {};
 
     return `
-      <div class="card">
-        <div class="section-title">Risk Radar</div>
-        <div class="path">updated: ${esc(riskRadarUpdatedAt || "unknown")}</div>
+      <div class="card architecture-section-card">
+        <div class="section-title">Start Here</div>
+        <div class="path">These are the most important places to inspect first when learning or changing this repo.</div>
         <div class="divider"></div>
-        <div class="section-title">Top Hotspots</div>
-        ${hotspotsHtml}
+        <div class="section-title">Highest-Impact Symbols</div>
+        ${renderArchitecturePriorityList(hotspots, "No hotspots detected.")}
         <div class="divider"></div>
-        <div class="section-title">Top Risky Files</div>
-        ${filesHtml}
-        <div class="divider"></div>
-        <div class="section-title">Refactor Targets</div>
-        ${refactorHtml}
+        <div class="section-title">Files Worth Reviewing</div>
+        ${renderArchitectureFileList(riskyFiles, "No risky files detected.")}
+        <div class="path">Hotspots: ${esc(String(health.hotspot_symbols || 0))} | Risky files: ${esc(String(health.risky_files || 0))} | Updated: ${esc(riskRadarUpdatedAt || "unknown")}</div>
       </div>
     `;
   }
@@ -834,49 +999,43 @@
 
       const orchestrators = (repo.orchestrators && repo.orchestrators.length ? repo.orchestrators : (repo.top_fan_out || []).map((x) => x.fqn || x)).filter(Boolean);
       const critical = (repo.critical_symbols && repo.critical_symbols.length ? repo.critical_symbols : (repo.top_fan_in || []).map((x) => x.fqn || x)).filter(Boolean);
-      const dead = (repo.dead_symbols || []).filter(Boolean);
       const cycles = dep.cycles || [];
+      const entryPoints = (repo.entry_points || []).filter(Boolean);
+      const dead = (repo.dead_symbols || []).filter(Boolean);
+      const architectureHealth = {
+        hotspot_symbols: Number((riskRadar && riskRadar.repo_health && riskRadar.repo_health.hotspot_symbols) || 0),
+        risky_files: Number((riskRadar && riskRadar.repo_health && riskRadar.repo_health.risky_files) || 0),
+        unresolved_ratio: Number((riskRadar && riskRadar.repo_health && riskRadar.repo_health.unresolved_ratio) || 0),
+      };
+      const keyRoutes = critical.slice(0, 4);
+      const deadNotice = dead.length
+        ? `<div class="architecture-note">Possible cleanup: ${esc(pluralize("dead symbol", dead.length))} detected.</div>`
+        : "";
 
       architectureViewEl.innerHTML = `
-        ${repoSummarySection()}
+        ${repoSummarySection() || architectureOverviewSection(repoSummary || {}, { repo_health: architectureHealth }, Number(dep.cycle_count || 0), entryPoints.length)}
         ${riskRadarSection()}
-        <div class="arch-grid">
-          <div class="kpi-card"><div class="kpi-label">Orchestrators</div><div class="kpi-value">${orchestrators.length}</div></div>
-          <div class="kpi-card"><div class="kpi-label">Critical APIs</div><div class="kpi-value">${critical.length}</div></div>
-          <div class="kpi-card"><div class="kpi-label">Dead Symbols</div><div class="kpi-value">${dead.length}</div></div>
-          <div class="kpi-card"><div class="kpi-label">Dependency Cycles</div><div class="kpi-value">${dep.cycle_count || 0}</div></div>
+        <div class="card architecture-section-card">
+          <div class="section-title">How This Repo Starts</div>
+          <div class="path">These are the places where requests, commands, or direct script execution likely begin.</div>
+          ${renderEntryPointList(entryPoints)}
         </div>
-        <div class="card">
-          <div class="section-title">Top Orchestrators</div>
-          ${renderSymbolList(orchestrators, symbolsMap, "No orchestrators detected.")}
+        <div class="card architecture-section-card">
+          <div class="section-title">Key Symbols To Learn First</div>
+          <div class="path">These are central APIs or orchestration points that help you understand the repo faster.</div>
+          ${renderSymbolList((keyRoutes.length ? keyRoutes : orchestrators.slice(0, 4)), symbolsMap, "No key symbols detected.")}
+          ${deadNotice}
         </div>
-        <div class="card">
-          <div class="section-title">Top Critical Symbols</div>
-          ${renderSymbolList(critical, symbolsMap, "No critical symbols detected.")}
-        </div>
-        <div class="card">
-          <div class="section-title">Dead Symbols</div>
-          ${renderSymbolList(dead, symbolsMap, "No dead symbols detected.")}
-        </div>
-        <div class="card">
+        <div class="card architecture-section-card">
           <div class="section-title">Dependency Cycles</div>
-          ${dep.cycle_count ? cycles.slice(0, 50).map((c, i) => `<div class="cycle-row"><span>${esc(c.join(" -> "))}</span><button class="copy-cycle" data-cycle="${esc(c.join(" -> "))}">Copy</button></div>`).join("") : "<div class='ok-cycle'>No cycles detected OK</div>"}
+          <div class="path">Fix these first if you want architecture to become easier to change and easier to explain.</div>
+          ${renderArchitectureCycleList(cycles)}
         </div>
       `;
-
-      const viewBtn = architectureViewEl.querySelector("#repo-summary-view");
-      if (viewBtn) {
-        viewBtn.addEventListener("click", async () => {
-          await loadRepoSummary(false, false);
-          await loadArchitecture();
-        });
-      }
       const regenBtn = architectureViewEl.querySelector("#repo-summary-regen");
       if (regenBtn) {
         regenBtn.addEventListener("click", async () => {
-          const forceEl = architectureViewEl.querySelector("#repo-summary-force");
-          const force = !!(forceEl && forceEl.checked);
-          await loadRepoSummary(force, true);
+          await loadRepoSummary(true, true);
           await loadArchitecture();
         });
       }
@@ -884,8 +1043,7 @@
         el.addEventListener("click", async () => {
           const fqn = el.getAttribute("data-fqn");
           if (!fqn) return;
-          setActiveTab("details");
-          await loadSymbol(fqn);
+          await openImpactPreview(fqn);
         });
       });
       architectureViewEl.querySelectorAll(".copy-cycle[data-cycle]").forEach((el) => {
@@ -917,6 +1075,62 @@
         </div>
       `;
     }
+  }
+
+  function graphModeLabel(mode) {
+    return mode === "file" ? "File map" : "Symbol map";
+  }
+
+  function graphDepthLabel(depth) {
+    const n = Math.max(1, Number(depth || 1));
+    return n === 1 ? "Direct neighbors only." : `Showing paths up to ${n} steps away.`;
+  }
+
+  function renderGraphStats(mode, nodes, incomingCount, outgoingCount, internalCount, depth) {
+    return `
+      <div class="impact-stats-grid graph-stats-grid">
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">${esc(mode === "file" ? "What reaches this file" : "Who reaches this symbol")}</div>
+          <div class="impact-stat-value">${esc(String(incomingCount))}</div>
+          <div class="path">${esc(pluralize("incoming path", incomingCount))}</div>
+        </div>
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">${esc(mode === "file" ? "What this file reaches" : "What this symbol reaches")}</div>
+          <div class="impact-stat-value">${esc(String(outgoingCount))}</div>
+          <div class="path">${esc(pluralize("outgoing path", outgoingCount))}</div>
+        </div>
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">${esc(mode === "file" ? "Inside this file" : "Visible graph nodes")}</div>
+          <div class="impact-stat-value">${esc(String(mode === "file" ? internalCount : nodes.length))}</div>
+          <div class="path">${esc(mode === "file" ? pluralize("internal edge", internalCount) : pluralize("node", nodes.length))}</div>
+        </div>
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">Depth</div>
+          <div class="impact-stat-value">d${esc(String(depth))}</div>
+          <div class="path">${esc(graphDepthLabel(depth))}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderGraphGuide(mode) {
+    return `
+      <div class="impact-guide graph-guide">
+        <div class="impact-guide-title">How to read this</div>
+        <div class="path">${mode === "file"
+          ? "The first section shows symbols outside the file that connect into it."
+          : "The first section shows who directly reaches the selected symbol."}</div>
+        <div class="path">${mode === "file"
+          ? "The second section shows what this file reaches outside itself."
+          : "The second section shows what the selected symbol directly calls."}</div>
+        <div class="path">Click a local node to open the preview popup without leaving Graph.</div>
+      </div>
+    `;
+  }
+
+  function renderGraphConnections(items, renderer, emptyText) {
+    if (!items || !items.length) return `<div class="muted">${esc(emptyText)}</div>`;
+    return items.slice(0, 200).map(renderer).join("");
   }
 
   function renderGraphData(data) {
@@ -968,59 +1182,243 @@
           <span class="legend-item"><span class="dot builtin"></span>Builtins</span>
           <span class="legend-item"><span class="dot external"></span>External</span>
         </div>
-        <div class="section-title">${mode === "file" ? "Center File" : "Center"}</div>
+        <div class="section-title">${esc(graphModeLabel(mode))}</div>
         ${mode === "file" ? `<div class="path">${esc(center)}</div>` : nodePill(center)}
-        ${mode === "file" ? `<div class="path">Seed symbols: ${seedNodes.size}</div>` : ""}
+        <div class="path">${esc(graphDepthLabel(data.depth))}</div>
+        ${mode === "file" ? `<div class="path">Seed symbols found in this file: ${esc(String(seedNodes.size))}</div>` : ""}
+        ${renderGraphStats(mode, nodes, incoming.length, outgoing.length, internal.length, data.depth)}
+        ${renderGraphGuide(mode)}
         <div class="divider"></div>
-        <div class="section-title">Incoming Callers (${incoming.length})</div>
-        ${incoming.length ? incoming.slice(0, 200).map((e) => `<div class="graph-edge-row">${nodePill(e.from)} <span class="edge-arrow">-></span> <span class="path">${esc(e.count)}x</span></div>`).join("") : "<div class='muted'>No incoming callers in current depth/filter.</div>"}
+        <div class="section-title">${esc(mode === "file" ? "What Reaches This File" : "Who Reaches This Symbol")} (${esc(String(incoming.length))})</div>
+        <div class="path">${esc(mode === "file" ? "These paths come from outside the selected file." : "These are the direct callers for the selected symbol.")}</div>
+        ${renderGraphConnections(
+          incoming,
+          (e) => `<div class="graph-connection-card">${nodePill(e.from)} <div class="path">${esc(mode === "file" ? `Reaches this file ${e.count} ${Number(e.count || 0) === 1 ? "time" : "times"}.` : `Calls this symbol ${e.count} ${Number(e.count || 0) === 1 ? "time" : "times"}.`)}</div></div>`,
+          mode === "file" ? "No outside paths reach this file in the current view." : "No symbols reach this symbol in the current view."
+        )}
         <div class="divider"></div>
-        <div class="section-title">Outgoing Callees (${outgoing.length})</div>
-        ${outgoing.length ? outgoing.slice(0, 200).map((e) => `<div class="graph-edge-row">${nodePill(e.to)} <span class="path">${esc(e.count)}x</span></div>`).join("") : "<div class='muted'>No outgoing callees in current depth/filter.</div>"}
-        ${mode === "file" ? `<div class="divider"></div><div class="section-title">Internal File Edges (${internal.length})</div>${internal.length ? internal.slice(0, 200).map((e) => `<div class="graph-edge-row">${nodePill(e.from)} <span class="edge-arrow">-></span> ${nodePill(e.to)} <span class="path">${esc(e.count)}x</span></div>`).join("") : "<div class='muted'>No internal edges in current depth/filter.</div>"}` : ""}
+        <div class="section-title">${esc(mode === "file" ? "What This File Reaches" : "What This Symbol Reaches")} (${esc(String(outgoing.length))})</div>
+        <div class="path">${esc(mode === "file" ? "These paths leave the selected file." : "These are the direct outgoing calls from the selected symbol.")}</div>
+        ${renderGraphConnections(
+          outgoing,
+          (e) => `<div class="graph-connection-card">${nodePill(e.to)} <div class="path">${esc(mode === "file" ? `Reached from this file ${e.count} ${Number(e.count || 0) === 1 ? "time" : "times"}.` : `Called from this symbol ${e.count} ${Number(e.count || 0) === 1 ? "time" : "times"}.`)}</div></div>`,
+          mode === "file" ? "No outgoing paths leave this file in the current view." : "This symbol does not reach any direct dependencies in the current view."
+        )}
+        ${mode === "file" ? `<div class="divider"></div><div class="section-title">What Happens Inside This File (${esc(String(internal.length))})</div><div class="path">These edges stay completely inside the selected file.</div>${renderGraphConnections(
+          internal,
+          (e) => `<div class="graph-connection-card"><div class="graph-edge-row">${nodePill(e.from)} <span class="edge-arrow">-></span> ${nodePill(e.to)}</div><div class="path">${esc(`Connected ${e.count} ${Number(e.count || 0) === 1 ? "time" : "times"} inside this file.`)}</div></div>`,
+          "No internal file edges found in the current view."
+        )}` : ""}
         <div class="divider"></div>
-        <div class="section-title">Subgraph Stats</div>
-        <div class="path">Nodes: ${nodes.length} | Edges: ${edges.length} | Depth: ${data.depth}</div>
+        <div class="section-title">Graph Summary</div>
+        <div class="path">Nodes: ${esc(String(nodes.length))} | Edges: ${esc(String(edges.length))} | Search matches: ${esc(String(matches.size))}</div>
       </div>
     `;
 
     graphViewEl.querySelectorAll(".graph-node.graph-clickable").forEach((el) => {
-      el.addEventListener("click", () => {
+      el.addEventListener("click", async () => {
         const next = el.getAttribute("data-node-id");
-        if (next) loadSymbol(next);
+        if (next) await openImpactPreview(next);
       });
     });
   }
 
-  function renderImpactList(nodes, emptyText) {
+  function pluralize(word, count) {
+    return `${count} ${word}${count === 1 ? "" : "s"}`;
+  }
+
+  function impactDistanceLabel(distance) {
+    const n = Math.max(1, Number(distance || 1));
+    return n === 1 ? "Direct" : `${n} steps away`;
+  }
+
+  function impactDistanceHint(direction, distance) {
+    const n = Math.max(1, Number(distance || 1));
+    if (direction === "upstream") {
+      return n === 1
+        ? "This symbol directly depends on the selected symbol."
+        : `This symbol may be affected through ${n} call steps.`;
+    }
+    return n === 1
+      ? "The selected symbol directly depends on this symbol."
+      : `This dependency is reached in ${n} call steps from the selected symbol.`;
+  }
+
+  function impactDepthSummary(depth) {
+    const n = Math.max(1, Number(depth || 1));
+    return n === 1
+      ? "Showing only direct connections."
+      : `Showing direct connections plus paths up to ${n} steps away.`;
+  }
+
+  function sumImpactFileCounts(items) {
+    return (items || []).reduce((total, item) => total + Number(item && item.count ? item.count : 0), 0);
+  }
+
+  function renderImpactStats(upNodes, downNodes, fileGroups, depth) {
+    const upstreamFiles = (fileGroups && fileGroups.upstream) || [];
+    const downstreamFiles = (fileGroups && fileGroups.downstream) || [];
+    const totalReviewFiles = new Set(
+      upstreamFiles.concat(downstreamFiles).map((item) => String(item.file || "")).filter(Boolean)
+    ).size;
+
+    return `
+      <div class="impact-stats-grid">
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">What may be affected</div>
+          <div class="impact-stat-value">${esc(String((upNodes || []).length))}</div>
+          <div class="path">${esc(pluralize("symbol", (upNodes || []).length))} depend on the target</div>
+        </div>
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">What this code relies on</div>
+          <div class="impact-stat-value">${esc(String((downNodes || []).length))}</div>
+          <div class="path">${esc(pluralize("dependency", (downNodes || []).length))} reachable from the target</div>
+        </div>
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">Files to review</div>
+          <div class="impact-stat-value">${esc(String(totalReviewFiles))}</div>
+          <div class="path">${esc(pluralize("file", totalReviewFiles))} contain impacted symbols</div>
+        </div>
+        <div class="impact-stat-card">
+          <div class="impact-stat-label">Depth setting</div>
+          <div class="impact-stat-value">d${esc(String(depth))}</div>
+          <div class="path">${esc(impactDepthSummary(depth))}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderImpactGuide(depth) {
+    return `
+      <div class="impact-guide">
+        <div class="impact-guide-title">How to read this</div>
+        <div class="path">Use the first section when you want to know what could break if you change the selected symbol.</div>
+        <div class="path">Use the second section when you want to understand what the selected symbol depends on.</div>
+        <div class="path">Rows marked <strong>Direct</strong> are the best place to start. ${esc(impactDepthSummary(depth))}</div>
+      </div>
+    `;
+  }
+
+  function renderImpactPreviewContent(result, fqn) {
+    const safeFqn = String((result && result.fqn) || fqn || "");
+    const summary = stripMarkdown((result && result.one_liner) || "") || "No summary available yet.";
+    const loc = (result && result.location) || {};
+    const relFile = relPath(loc.file || "");
+    const connections = (result && result.connections) || {};
+    const calledBy = Array.isArray(connections.called_by) ? connections.called_by : [];
+    const calls = Array.isArray(connections.calls) ? connections.calls : [];
+    const usedIn = Array.isArray(connections.used_in) ? connections.used_in : [];
+    const notes = Array.isArray(result && result.details) ? result.details.filter(Boolean).slice(0, 3).map(stripMarkdown) : [];
+
+    return `
+      <div class="impact-preview-main">
+        <div class="impact-preview-symbol">${esc(shortLabel(safeFqn))}</div>
+        <div class="path">Full name: ${esc(fullLabel(safeFqn))}</div>
+        <div class="path">Location: ${esc(relFile || "Unknown file")}${loc.start_line ? `:${esc(loc.start_line)}` : ""}</div>
+        <div class="divider"></div>
+        <div class="section-title">What this symbol does</div>
+        <div>${esc(summary)}</div>
+        <div class="impact-preview-stats">
+          <div class="impact-preview-stat">
+            <div class="impact-preview-stat-value">${esc(String(calledBy.length))}</div>
+            <div class="path">Callers</div>
+          </div>
+          <div class="impact-preview-stat">
+            <div class="impact-preview-stat-value">${esc(String(calls.length))}</div>
+            <div class="path">Outgoing calls</div>
+          </div>
+          <div class="impact-preview-stat">
+            <div class="impact-preview-stat-value">${esc(String(usedIn.length))}</div>
+            <div class="path">Usages</div>
+          </div>
+        </div>
+        ${notes.length ? `
+          <div class="divider"></div>
+          <div class="section-title">Notes</div>
+          ${notes.map((note) => `<div class="path">${esc(note)}</div>`).join("")}
+        ` : ""}
+      </div>
+    `;
+  }
+
+  function closeImpactPreview(syncBody = true) {
+    impactPreviewFqn = "";
+    if (impactPreviewModalEl) impactPreviewModalEl.classList.add("hidden");
+    if (impactPreviewContentEl) {
+      impactPreviewContentEl.classList.add("muted");
+      impactPreviewContentEl.textContent = "Loading preview...";
+    }
+    if (impactPreviewSubtitleEl) impactPreviewSubtitleEl.textContent = "Quick context for this symbol";
+    if (syncBody) syncModalBodyState();
+  }
+
+  async function openImpactPreview(fqn) {
+    if (!fqn) return;
+    if (!impactPreviewModalEl || !impactPreviewContentEl) {
+      setActiveTab("details");
+      await loadSymbol(fqn);
+      return;
+    }
+
+    impactPreviewFqn = fqn;
+    impactPreviewModalEl.classList.remove("hidden");
+    impactPreviewContentEl.classList.add("muted");
+    impactPreviewContentEl.innerHTML = "<div class='card'>Loading preview...</div>";
+    if (impactPreviewSubtitleEl) impactPreviewSubtitleEl.textContent = shortLabel(fqn);
+    syncModalBodyState();
+
+    try {
+      let symbolData = symbolCache.get(fqn);
+      if (!symbolData) {
+        symbolData = await fetchJson(`/api/symbol?fqn=${encodeURIComponent(fqn)}`);
+        symbolCache.set(fqn, symbolData);
+      }
+      prefetchSymbolTabData(fqn);
+      if (impactPreviewFqn !== fqn) return;
+      const result = symbolData.result || {};
+      impactPreviewContentEl.classList.remove("muted");
+      impactPreviewContentEl.innerHTML = renderImpactPreviewContent(result, fqn);
+    } catch (e) {
+      if (impactPreviewFqn !== fqn) return;
+      impactPreviewContentEl.classList.remove("muted");
+      impactPreviewContentEl.textContent = redactSecrets((e && (e.error || e.message)) || "Preview unavailable.");
+    }
+  }
+
+  function renderImpactList(nodes, emptyText, direction) {
     if (!nodes || !nodes.length) return `<div class="muted">${esc(emptyText)}</div>`;
     return nodes.slice(0, 200).map((n) => {
       const isLocal = !String(n.fqn || "").startsWith("builtins.") && !String(n.fqn || "").startsWith("external::");
-      if (isLocal) {
-        return `
-          <button class="arch-row impact-node-row" data-fqn="${esc(n.fqn)}">
-            <span class="arch-name">${esc(shortLabel(n.fqn))}</span>
-            <span class="impact-distance">d${esc(n.distance)}</span>
-            <span class="path">in:${esc(n.fan_in)} out:${esc(n.fan_out)} ${esc(n.file ? relPath(n.file) : "")}:${esc(n.line)}</span>
-          </button>
-        `;
-      }
-      return `
-        <div class="risk-file-row">
-          <span class="arch-name">${esc(shortLabel(n.fqn))}</span>
-          <span class="impact-distance">d${esc(n.distance)}</span>
-          <span class="path">in:${esc(n.fan_in)} out:${esc(n.fan_out)} ${esc(n.file ? relPath(n.file) : "")}:${esc(n.line)}</span>
+      const fileLocation = n.file ? `${relPath(n.file)}:${n.line}` : "Location unavailable";
+      const wrapperClass = isLocal ? "arch-row impact-node-row" : "impact-node-static";
+      const label = shortLabel(n.fqn);
+      const relation = impactDistanceHint(direction, n.distance);
+      const distance = impactDistanceLabel(n.distance);
+      const content = `
+        <div class="impact-node-header">
+          <span class="arch-name">${esc(label)}</span>
+          <span class="impact-distance">${esc(distance)}</span>
+        </div>
+        <div class="impact-node-copy">${esc(relation)}</div>
+        <div class="impact-meta-row">
+          <span class="impact-meta-pill">Incoming users: ${esc(String(n.fan_in || 0))}</span>
+          <span class="impact-meta-pill">Outgoing calls: ${esc(String(n.fan_out || 0))}</span>
+          <span class="impact-meta-pill">Location: ${esc(fileLocation)}</span>
         </div>
       `;
+      if (isLocal) {
+        return `<button class="${wrapperClass}" data-fqn="${esc(n.fqn)}">${content}</button>`;
+      }
+      return `<div class="${wrapperClass}">${content}</div>`;
     }).join("");
   }
 
-  function renderImpactedFiles(items) {
-    if (!items || !items.length) return "<div class='muted'>No impacted files.</div>";
+  function renderImpactedFiles(items, emptyText) {
+    if (!items || !items.length) return `<div class='muted'>${esc(emptyText)}</div>`;
     return items.slice(0, 15).map((x) => `
       <div class="impact-file-row">
         <span class="path">${esc(relPath(x.file || ""))}</span>
-        <span class="impact-distance">${esc(x.count)}</span>
+        <span class="impact-distance">${esc(String(x.count || 0))} symbols</span>
       </div>
     `).join("");
   }
@@ -1030,7 +1428,7 @@
     const anchor = fqn || activeSymbolFqn;
     if (!anchor) {
       impactViewEl.classList.add("muted");
-      impactViewEl.textContent = "Select a symbol to view impact.";
+      impactViewEl.textContent = "Select a symbol to see what may be affected if you change it.";
       return;
     }
     const depth = Number(impactDepthEl && impactDepthEl.value ? impactDepthEl.value : 2);
@@ -1050,24 +1448,33 @@
       const truncated = !!(up.truncated || down.truncated);
       const upstreamBadge = up.truncated ? " <span class='impact-section-badge'>TRUNCATED</span>" : "";
       const downstreamBadge = down.truncated ? " <span class='impact-section-badge'>TRUNCATED</span>" : "";
+      const upstreamFileCount = sumImpactFileCounts(files.upstream || []);
+      const downstreamFileCount = sumImpactFileCounts(files.downstream || []);
 
       impactViewEl.innerHTML = `
         <div class="card impact-card">
-          <div class="section-title">Impact</div>
-          <div class="path">Target: ${esc(anchor)} | depth: ${esc(data.depth)} | max_nodes: ${esc(data.max_nodes)}</div>
+          <div class="section-title">Change Impact</div>
+          <div class="path">Selected symbol: ${esc(anchor)}</div>
+          <div class="path">Depth: ${esc(data.depth)} | Max nodes: ${esc(data.max_nodes)}</div>
           ${truncated ? `<div class='impact-truncated-banner'>Warning: Results truncated (max_nodes=${esc(data.max_nodes)}). Displaying partial results.</div>` : ""}
+          ${renderImpactStats(up.nodes || [], down.nodes || [], files, data.depth)}
+          ${renderImpactGuide(data.depth)}
           <div class="divider"></div>
-          <div class="section-title">Upstream${upstreamBadge}</div>
-          ${renderImpactList(up.nodes || [], "No upstream dependents in selected depth.")}
+          <div class="section-title">What May Be Affected If You Change This${upstreamBadge}</div>
+          <div class="path">These symbols depend on the selected symbol. Start with the rows marked Direct.</div>
+          ${renderImpactList(up.nodes || [], "No affected dependents found in the selected depth.", "upstream")}
           <div class="divider"></div>
-          <div class="section-title">Downstream${downstreamBadge}</div>
-          ${renderImpactList(down.nodes || [], "No downstream dependencies in selected depth.")}
+          <div class="section-title">What This Code Relies On${downstreamBadge}</div>
+          <div class="path">These are the dependencies reached from the selected symbol within the chosen depth.</div>
+          ${renderImpactList(down.nodes || [], "No downstream dependencies found in the selected depth.", "downstream")}
           <div class="divider"></div>
-          <div class="section-title">Impacted Files (Upstream)</div>
-          ${renderImpactedFiles(files.upstream || [])}
+          <div class="section-title">Files To Review First</div>
+          <div class="path">${esc(pluralize("impacted symbol", upstreamFileCount))} live in these files.</div>
+          ${renderImpactedFiles(files.upstream || [], "No impacted files on the affected side.")}
           <div class="divider"></div>
-          <div class="section-title">Impacted Files (Downstream)</div>
-          ${renderImpactedFiles(files.downstream || [])}
+          <div class="section-title">Files This Symbol Depends On</div>
+          <div class="path">${esc(pluralize("dependency symbol", downstreamFileCount))} are spread across these files.</div>
+          ${renderImpactedFiles(files.downstream || [], "No dependency files found on the downstream side.")}
         </div>
       `;
 
@@ -1075,8 +1482,7 @@
         el.addEventListener("click", async () => {
           const next = el.getAttribute("data-fqn");
           if (!next) return;
-          setActiveTab("details");
-          await loadSymbol(next);
+          await openImpactPreview(next);
         });
       });
     } catch (e) {
@@ -1100,8 +1506,8 @@
     if (!anchor) {
       graphViewEl.classList.add("muted");
       graphViewEl.textContent = graphMode === "file"
-        ? "Select a file to view file graph."
-        : "Select a symbol to view graph.";
+        ? "Select a file to see how it connects to the rest of the repo."
+        : "Select a symbol to see its connection map.";
       return;
     }
     const key = `${graphMode}|${anchor}|${p.depth}|${p.hideBuiltins}|${p.hideExternal}`;
@@ -1884,7 +2290,11 @@
 
   function bindConnectionLinks(container) {
     container.querySelectorAll(".connection-link").forEach((el) => {
-      el.addEventListener("click", () => loadSymbol(el.getAttribute("data-fqn")));
+      el.addEventListener("click", async () => {
+        const fqn = el.getAttribute("data-fqn");
+        if (!fqn) return;
+        await openImpactPreview(fqn);
+      });
     });
   }
 
@@ -2205,7 +2615,7 @@
     confirmMessageEl.textContent = redactSecrets(String(message || ""));
     const open = !!(window.confirmState && window.confirmState.open);
     confirmModalEl.classList.toggle("hidden", !open);
-    document.body.classList.toggle("modal-open", open);
+    syncModalBodyState();
   }
 
   function closeConfirmModal(result) {
@@ -2550,6 +2960,35 @@
     if (impactMaxNodesEl) impactMaxNodesEl.addEventListener("change", rerenderImpact);
   }
 
+  function bindImpactPreviewControls() {
+    if (impactPreviewCloseEl) {
+      impactPreviewCloseEl.addEventListener("click", () => {
+        closeImpactPreview();
+      });
+    }
+    if (impactPreviewOpenDetailsEl) {
+      impactPreviewOpenDetailsEl.addEventListener("click", async () => {
+        const next = impactPreviewFqn;
+        closeImpactPreview();
+        if (!next) return;
+        setActiveTab("details");
+        await loadSymbol(next);
+      });
+    }
+    if (impactPreviewModalEl) {
+      impactPreviewModalEl.addEventListener("click", (e) => {
+        if (e.target === impactPreviewModalEl) {
+          closeImpactPreview();
+        }
+      });
+    }
+    document.addEventListener("keydown", async (e) => {
+      if (e.key === "Escape" && impactPreviewModalEl && !impactPreviewModalEl.classList.contains("hidden")) {
+        closeImpactPreview();
+      }
+    });
+  }
+
   async function loadFile(relFilePath) {
     activeFilePath = relFilePath;
     highlightActiveFile();
@@ -2623,6 +3062,104 @@
     return items.map(renderer).join("");
   }
 
+  function detailRoleLabel(calledByCount, callsCount, usedInCount) {
+    if (calledByCount >= 5 && callsCount >= 5) return "Core coordinator";
+    if (calledByCount >= 5) return "Shared API";
+    if (callsCount >= 5) return "Workflow helper";
+    if (usedInCount >= 4) return "Shared utility";
+    return "Focused local symbol";
+  }
+
+  function detailChangeLabel(calledByCount, usedInCount) {
+    const reach = Number(calledByCount || 0) + Number(usedInCount || 0);
+    if (reach >= 8) return "High impact";
+    if (reach >= 3) return "Change with review";
+    return "Likely safe to change";
+  }
+
+  function detailNextStep(calledByCount, callsCount, usedInCount) {
+    if (calledByCount > 0) return "Start with 'Who uses this' to see what depends on it before editing.";
+    if (callsCount > 0) return "Start with 'What this uses' to understand its direct dependencies.";
+    if (usedInCount > 0) return "Start with 'Where this appears' to see where it shows up in the repo.";
+    return "This symbol looks isolated. Read the summary first, then inspect the file for surrounding context.";
+  }
+
+  function renderDetailOverview(summary, roleLabel, changeLabel, locationText, calledByCount, callsCount, usedInCount) {
+    return `
+      <div class="detail-guide">
+        <div class="detail-guide-top">
+          <span class="detail-badge detail-badge-role">${esc(roleLabel)}</span>
+          <span class="detail-badge detail-badge-impact">${esc(changeLabel)}</span>
+        </div>
+        <div class="detail-guide-title">Start Here</div>
+        <div>${esc(summary || "No summary available yet.")}</div>
+        <div class="path">Location: ${esc(locationText || "Unknown location")}</div>
+        <div class="path">${esc(detailNextStep(calledByCount, callsCount, usedInCount))}</div>
+      </div>
+    `;
+  }
+
+  function renderDetailStats(calledByCount, callsCount, usedInCount) {
+    return `
+      <div class="detail-grid">
+        <div class="detail-stat-card">
+          <div class="detail-stat-label">Who uses this</div>
+          <div class="detail-stat-value">${esc(String(calledByCount))}</div>
+          <div class="path">${esc(pluralize("symbol", calledByCount))} use it directly</div>
+        </div>
+        <div class="detail-stat-card">
+          <div class="detail-stat-label">What this uses</div>
+          <div class="detail-stat-value">${esc(String(callsCount))}</div>
+          <div class="path">${esc(pluralize("direct dependency", callsCount))} are referenced here</div>
+        </div>
+        <div class="detail-stat-card">
+          <div class="detail-stat-label">Where this appears</div>
+          <div class="detail-stat-value">${esc(String(usedInCount))}</div>
+          <div class="path">${esc(pluralize("usage", usedInCount))} found elsewhere in the repo</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderDetailConnectionList(items, emptyText, kind) {
+    if (!items || !items.length) return renderEmptyState(emptyText);
+    return items.slice(0, 12).map((item) => {
+      if (kind === "called_by") {
+        return `
+          <div class="detail-connection-row">
+            <div class="detail-connection-main">
+              <span class="connection-link" data-fqn="${esc(item.fqn)}">${esc(shortLabel(item.fqn))}</span>
+              <div class="path">This symbol directly uses the current symbol.</div>
+            </div>
+            <div class="path">${esc(relPath(item.file || ""))}:${esc(item.line || "")}</div>
+          </div>
+        `;
+      }
+      if (kind === "calls") {
+        const label = item.clickable
+          ? `<span class="connection-link" data-fqn="${esc(item.fqn)}">${esc(item.name)}</span>`
+          : `<span class="connection-muted">${esc(item.name)}</span>`;
+        return `
+          <div class="detail-connection-row">
+            <div class="detail-connection-main">
+              ${label}
+              <div class="path">Called ${esc(String(item.count || 0))} ${Number(item.count || 0) === 1 ? "time" : "times"} from this symbol.</div>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="detail-connection-row">
+          <div class="detail-connection-main">
+            <span class="connection-link" data-fqn="${esc(item.fqn)}">${esc(shortLabel(item.fqn))}</span>
+            <div class="path">This symbol appears in another usage path.</div>
+          </div>
+          <div class="path">${esc(relPath(item.file || ""))}:${esc(item.line || "")}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
 
   async function loadSymbol(fqn) {
     activeSymbolFqn = fqn;
@@ -2646,7 +3183,7 @@
         return symbolData;
       })();
 
-      const [symbolData] = await Promise.all([symbolPromise, delay(150)]);
+      const [symbolData] = await Promise.all([symbolPromise, delay(40)]);
 
       const result = symbolData.result || {};
       const loc = result.location || {};
@@ -2663,6 +3200,8 @@
       const calledBy = connections.called_by || [];
       const calls = connections.calls || [];
       const usedIn = (connections.used_in || []).slice().sort((a, b) => (a.file || "").localeCompare(b.file || ""));
+      const roleLabel = detailRoleLabel(calledBy.length, calls.length, usedIn.length);
+      const changeLabel = detailChangeLabel(calledBy.length, usedIn.length);
 
       const crumbs = [
         { label: repoName || "repo", action: "repo", value: "" },
@@ -2679,54 +3218,29 @@
             ${crumbs.map((c) => `<span class="crumb-link" data-action="${esc(c.action)}" data-value="${esc(c.value)}">${esc(c.label)}</span>`).join("<span class='crumb-sep'>></span>")}
           </div>
           <div class="chips">
-            <button class="chip" data-target="called-by-section">Called by: ${calledBy.length}</button>
-            <button class="chip" data-target="calls-section">Calls: ${calls.length}</button>
-            <button class="chip" data-target="used-in-section">Used in: ${usedIn.length}</button>
+            <button class="chip" data-target="called-by-section">Who uses this: ${calledBy.length}</button>
+            <button class="chip" data-target="calls-section">What this uses: ${calls.length}</button>
+            <button class="chip" data-target="used-in-section">Where this appears: ${usedIn.length}</button>
           </div>
           <div class="symbol-title-main">${esc(symbolParts.display)}</div>
-          <div class="path">FQN: ${esc(result.fqn || fqn)}</div>
-          <div class="path">${esc(locationText)}</div>
-          <div class="divider"></div>
-          <div class="section-title">Summary</div>
-          <div>${esc(summary)}</div>
+          <div class="path">Full name: ${esc(fullLabel(result.fqn || fqn))}</div>
+          ${renderDetailOverview(summary, roleLabel, changeLabel, locationText, calledBy.length, calls.length, usedIn.length)}
+          ${renderDetailStats(calledBy.length, calls.length, usedIn.length)}
           <div id="called-by-section" class="divider"></div>
-          <div class="section-title">Called by</div>
-          ${renderConnectionBlock(calledBy, (c) => `
-            <div>
-              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.fqn)}">${esc(c.fqn)}</span>
-              <span class="path">${esc(c.file)}:${esc(c.line)}</span>
-            </div>
-          `, "No callers found")}
+          <div class="section-title">Who Uses This</div>
+          <div class="path">Review these first before changing the symbol.</div>
+          ${renderDetailConnectionList(calledBy, "No direct users found.", "called_by")}
           <div id="calls-section" class="divider"></div>
-          <div class="section-title">Calls</div>
-          ${renderConnectionBlock(calls, (c) => `
-            <div>
-              ${c.clickable
-                ? `<span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(c.fqn)}">${esc(c.name)}</span>`
-                : `<span class="connection-muted">${esc(c.name)}</span>`
-              }
-              <span class="path">(${esc(c.count)}x)</span>
-            </div>
-          `, "No calls found")}
-          <div class="divider"></div>
-          <div class="section-title">Top Callees</div>
-          ${renderConnectionBlock(calls.slice(0, 10), (c) => `
-            <div>
-              <span class="${c.clickable ? "connection-link" : "connection-muted"}" ${c.clickable ? `data-fqn="${esc(c.fqn)}"` : ""}>${esc(c.name)}</span>
-              <span class="path">(${esc(c.count)}x)</span>
-            </div>
-          `, "No callees found")}
+          <div class="section-title">What This Uses</div>
+          <div class="path">These are the direct dependencies called from this symbol.</div>
+          ${renderDetailConnectionList(calls, "No direct dependencies found.", "calls")}
           <div id="used-in-section" class="divider"></div>
-          <div class="section-title">Used in</div>
-          ${renderConnectionBlock(usedIn, (u) => `
-            <div>
-              <span class="conn-arrow">-></span><span class="connection-link" data-fqn="${esc(u.fqn)}">${esc(u.fqn)}</span>
-              <span class="path">${esc(u.file)}:${esc(u.line)}</span>
-            </div>
-          `, "No usages found")}
+          <div class="section-title">Where This Appears</div>
+          <div class="path">Helpful when you want more examples of how the symbol is used.</div>
+          ${renderDetailConnectionList(usedIn, "No extra usage locations found.", "used_in")}
           <div class="divider"></div>
           <div class="section-title">Notes</div>
-          ${notes.length ? notes.map((n) => `<div>${esc(n)}</div>`).join("") : "<div class='muted'>None</div>"}
+          ${notes.length ? notes.map((n) => `<div class="detail-note-row">${esc(n)}</div>`).join("") : "<div class='muted'>No extra notes.</div>"}
         </div>
       `;
 
@@ -2734,6 +3248,7 @@
       bindBreadcrumbs(symbolViewEl, result.fqn || fqn);
       bindConnectionChips(symbolViewEl);
       highlightActiveSymbol();
+      prefetchSymbolTabData(result.fqn || fqn);
       await updateUiState({ opened_symbol: (result.fqn || fqn), last_symbol: (result.fqn || fqn) });
       if (activeTab === "graph" && graphParams().mode === "symbol") {
         await loadGraph(result.fqn || fqn);
@@ -2797,6 +3312,7 @@
     bindRepoInlineControls();
     bindDataPrivacyControls();
     bindGraphControls();
+    bindImpactPreviewControls();
     setActiveTab("details");
     try {
       await loadWorkspace();

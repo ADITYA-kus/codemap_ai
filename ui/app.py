@@ -79,6 +79,7 @@ templates.env.cache = NoCache()
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 SEARCH_INDEX_CACHE: Dict[str, List[Dict[str, Any]]] = {}
 GRAPH_INDEX_CACHE: Dict[str, Dict[str, Any]] = {}
+REPO_DATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _load_json(path: str, default: Any) -> Any:
@@ -583,9 +584,19 @@ def _rel_file(ctx: Dict[str, str], file_path: str) -> str:
 
 
 def _load_repo_data(ctx: Dict[str, str]) -> Dict[str, Any]:
+    cache_key = ctx["repo_hash"]
+    explain_mtime = os.path.getmtime(ctx["explain_path"]) if os.path.exists(ctx["explain_path"]) else -1
+    resolved_mtime = os.path.getmtime(ctx["resolved_calls_path"]) if os.path.exists(ctx["resolved_calls_path"]) else -1
+    signature = f"{explain_mtime}:{resolved_mtime}"
+    cached = REPO_DATA_CACHE.get(cache_key)
+    if cached and cached.get("signature") == signature:
+        return cached["data"]
+
     explain = _load_json(ctx["explain_path"], {})
     resolved_calls = _load_json(ctx["resolved_calls_path"], [])
-    return {"explain": explain, "resolved_calls": resolved_calls}
+    data = {"explain": explain, "resolved_calls": resolved_calls}
+    REPO_DATA_CACHE[cache_key] = {"signature": signature, "data": data}
+    return data
 
 
 def _repo_registry_data() -> List[Dict[str, Any]]:
@@ -632,32 +643,11 @@ def _build_symbol_connections(
     ctx: Dict[str, str],
     fqn: str,
     explain: Dict[str, Any],
-    resolved_calls: List[Dict[str, Any]],
+    graph_index: Dict[str, Any],
 ) -> Dict[str, Any]:
-    called_by: List[Dict[str, Any]] = []
-    used_in: List[Dict[str, Any]] = []
-    calls_counter: Counter[str] = Counter()
-
-    for call in resolved_calls:
-        caller_fqn = call.get("caller_fqn")
-        callee_fqn = call.get("callee_fqn")
-        file_path = call.get("file", "")
-        line = int(call.get("line", -1))
-
-        if callee_fqn == fqn:
-            item = {
-                "fqn": caller_fqn,
-                "file": _rel_file(ctx, file_path),
-                "line": line,
-            }
-            called_by.append(item)
-            used_in.append(item)
-
-        if caller_fqn == fqn and callee_fqn:
-            calls_counter[callee_fqn] += 1
-
-    called_by.sort(key=lambda x: (x.get("file", ""), int(x.get("line", -1)), x.get("fqn", "")))
-    used_in.sort(key=lambda x: (x.get("file", ""), int(x.get("line", -1)), x.get("fqn", "")))
+    called_by = list(graph_index.get("called_by_map", {}).get(fqn, []))
+    used_in = list(called_by)
+    calls_counter: Counter[str] = graph_index.get("outgoing_counts_map", {}).get(fqn, Counter())
 
     calls: List[Dict[str, Any]] = []
     for callee_fqn, count in sorted(calls_counter.items(), key=lambda x: (x[0].lower(), x[1])):
@@ -843,12 +833,15 @@ def _build_graph_index(ctx: Dict[str, str]) -> Dict[str, Any]:
     if cached and cached.get("signature") == signature:
         return cached["index"]
 
-    explain = _load_json(ctx["explain_path"], {})
-    resolved_calls = _load_json(ctx["resolved_calls_path"], [])
+    repo_data = _load_repo_data(ctx)
+    explain = repo_data["explain"]
+    resolved_calls = repo_data["resolved_calls"]
 
     callees_map: Dict[str, List[str]] = {}
     callers_map: Dict[str, List[str]] = {}
     edge_counts: Dict[tuple, int] = {}
+    called_by_map: Dict[str, List[Dict[str, Any]]] = {}
+    outgoing_counts_map: Dict[str, Counter[str]] = {}
 
     for call in resolved_calls:
         caller = call.get("caller_fqn")
@@ -863,12 +856,25 @@ def _build_graph_index(ctx: Dict[str, str]) -> Dict[str, Any]:
         callers_map.setdefault(callee, []).append(caller)
         edge_key = (caller, callee)
         edge_counts[edge_key] = edge_counts.get(edge_key, 0) + 1
+        outgoing_counts_map.setdefault(caller, Counter())[callee] += 1
+        called_by_map.setdefault(callee, []).append(
+            {
+                "fqn": caller,
+                "file": _rel_file(ctx, call.get("file", "")),
+                "line": int(call.get("line", -1)),
+            }
+        )
+
+    for rows in called_by_map.values():
+        rows.sort(key=lambda x: (x.get("file", ""), int(x.get("line", -1)), x.get("fqn", "")))
 
     index = {
         "explain": explain,
         "callees_map": callees_map,
         "callers_map": callers_map,
         "edge_counts": edge_counts,
+        "called_by_map": called_by_map,
+        "outgoing_counts_map": outgoing_counts_map,
     }
     GRAPH_INDEX_CACHE[cache_key] = {"signature": signature, "index": index}
     return index
@@ -1956,13 +1962,13 @@ def api_symbol(fqn: str = Query(...), repo: Optional[str] = Query(default=None))
     if not _has_analysis_cache(ctx):
         return _missing_cache_response()
 
-    explain = _load_json(ctx["explain_path"], {})
+    graph_index = _build_graph_index(ctx)
+    explain = graph_index["explain"]
     obj = explain.get(fqn)
     if not obj:
         return JSONResponse(status_code=404, content={"ok": False, "error": "NOT_FOUND", "fqn": fqn})
-    resolved_calls = _load_json(ctx["resolved_calls_path"], [])
     result = dict(obj)
-    result["connections"] = _build_symbol_connections(ctx, fqn, explain, resolved_calls)
+    result["connections"] = _build_symbol_connections(ctx, fqn, explain, graph_index)
     return {"ok": True, "result": result}
 
 

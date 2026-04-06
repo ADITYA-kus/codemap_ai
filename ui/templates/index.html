@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CodeMap UI</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260406i" />
   <script>
     // Apply theme IMMEDIATELY on page load, before rendering
     (function() {
@@ -197,32 +197,32 @@
         <button id="tab-architecture" class="tab-btn" type="button">Architecture</button>
       </div>
       <div id="graph-controls" class="graph-controls hidden">
-        <label>Mode
+        <label>View
           <select id="graph-mode">
-            <option value="symbol" selected>Symbol</option>
-            <option value="file">File</option>
+            <option value="symbol" selected>Symbol map</option>
+            <option value="file">File map</option>
           </select>
         </label>
-        <label>Depth
+        <label>How far to trace
           <select id="graph-depth">
             <option value="1" selected>1</option>
             <option value="2">2</option>
             <option value="3">3</option>
           </select>
         </label>
-        <label><input id="graph-hide-builtins" type="checkbox" checked /> Hide builtins</label>
-        <label><input id="graph-hide-external" type="checkbox" checked /> Hide external</label>
-        <input id="graph-search" type="text" placeholder="Search graph nodes..." />
+        <label><input id="graph-hide-builtins" type="checkbox" checked /> Hide Python builtins</label>
+        <label><input id="graph-hide-external" type="checkbox" checked /> Hide external packages</label>
+        <input id="graph-search" type="text" placeholder="Search graph nodes or labels..." />
       </div>
       <div id="impact-controls" class="graph-controls hidden">
-        <label>Depth
+        <label>How far to trace
           <select id="impact-depth">
             <option value="1">1</option>
             <option value="2" selected>2</option>
             <option value="3">3</option>
           </select>
         </label>
-        <label>Max nodes
+        <label>Result limit
           <select id="impact-max-nodes">
             <option value="200" selected>200</option>
             <option value="100">100</option>
@@ -233,8 +233,8 @@
         </label>
       </div>
       <div id="symbol-view" class="content muted">Select a symbol to view summary and usages.</div>
-      <div id="impact-view" class="content muted hidden">Select a symbol to view impact.</div>
-      <div id="graph-view" class="content muted hidden">Select a symbol to view graph.</div>
+      <div id="impact-view" class="content muted hidden">Select a symbol to see what may be affected if you change it.</div>
+      <div id="graph-view" class="content muted hidden">Select a symbol to see its connection map.</div>
       <div id="architecture-view" class="content muted hidden">Select a repository to view architecture insights.</div>
     </section>
   </main>
@@ -251,10 +251,26 @@
     </div>
   </div>
 
+  <div id="impact-preview-modal" class="confirm-modal hidden">
+    <div class="confirm-card impact-preview-card">
+      <div class="impact-preview-topbar">
+        <div>
+          <div class="section-title">Symbol Preview</div>
+          <div id="impact-preview-subtitle" class="path">Quick context for this symbol</div>
+        </div>
+        <button id="impact-preview-close" class="repo-btn" type="button">Close</button>
+      </div>
+      <div id="impact-preview-content" class="content muted">Loading preview...</div>
+      <div class="repo-row-actions">
+        <button id="impact-preview-open-details" class="repo-btn" type="button">Open full details</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     window.CODEMAP_DEFAULT_REPO = "{{ default_repo }}";
   </script>
-  <script src="/static/app.js?v=20260306b"></script>
+  <script src="/static/app.js?v=20260406i"></script>
 </body>
 </html>
 
